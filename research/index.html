@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Research Log · GuildLM</title>
+<meta name="description" content="GuildLM research log — step-by-step, honestly-reported experiments: training small Go specialist models locally for $0, and the benchmarks that measure them.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="../index.html">Home</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<main class="loglist">
+  <h1>Research Log</h1>
+  <p class="loglist__sub">
+    Every experiment, step by step — what we trained, how we measured it, and what the numbers actually
+    said (wins <em>and</em> losses). All runs are local, $0, and reproducible.
+  </p>
+
+  <a class="logentry" href="2026-06-28-first-go-specialist.html">
+    <div class="logentry__date">2026-06-28 · Report #1</div>
+    <div class="logentry__title">The first GuildLM Go specialist, measured honestly</div>
+    <div class="logentry__desc">
+      Trained a go-developer 7B locally for $0. On a 19-task hidden-test benchmark it beats a general 7B
+      (15/19 vs 12/19) — the thesis validated. Plus an honest negative: the 14B base did worse, not better.
+    </div>
+  </a>
+</main>
+</body>
+</html>

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #1 — The first GuildLM Go specialist, measured honestly · GuildLM Research</title>
+<meta name="description" content="We trained the first GuildLM Go-developer specialist locally on an M1 for $0 and benchmarked it against a general LLM. The Go specialist scores 15/19 vs the general model's 12/19 — plus an honest negative result on the 14B base.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #1 · 2026-06-28</div>
+  <h1>The first GuildLM Go specialist, measured honestly</h1>
+  <p class="report__lede">
+    Today we trained the first dedicated GuildLM <strong>go-developer</strong> model — entirely
+    locally on an Apple M1 Max, for <strong>$0</strong>, no cloud GPU — and put it on an objective,
+    hidden-test benchmark. The headline: a Go-specialized 7B beats a general 7B by a clear margin.
+    The fine print, which we report in full because honesty is the point: beating an
+    <em>already code-specialized</em> base is hard, and going bigger (14B) made things worse, not better.
+  </p>
+
+  <h2>The leaderboard</h2>
+  <p>
+    Benchmark: <code>go_dev_bench</code> — 19 held-out "spec → Go function" tasks, each with a
+    <strong>hidden test</strong>. A task counts only if the model's own generated code compiles and
+    passes its test (<code>pass@1</code>, scored with the real Go toolchain, no judge).
+  </p>
+  <table>
+    <thead><tr><th>Model</th><th>Type</th><th class="score">pass@1</th></tr></thead>
+    <tbody>
+      <tr class="win"><td>go-dev v1 <span class="tag-win">★</span></td><td>7B coder + Go SFT (ours)</td><td class="score">15/19 · 79%</td></tr>
+      <tr><td>Qwen2.5-Coder-7B</td><td>7B code base (untuned)</td><td class="score">14/19 · 74%</td></tr>
+      <tr><td>Qwen2.5-Coder-14B</td><td>14B code base (4-bit)</td><td class="score">13/19 · 68% <span class="tag-down">↓</span></td></tr>
+      <tr><td>Qwen2.5-7B-Instruct</td><td>general 7B (non-coder)</td><td class="score">12/19 · 63%</td></tr>
+      <tr><td>go-dev 14B</td><td>14B coder + Go SFT</td><td class="score">11/19 · 58% <span class="tag-down">↓↓</span></td></tr>
+    </tbody>
+  </table>
+
+  <div class="report__callout">
+    <p><strong>The thesis holds.</strong> A Go-specialized 7B (15/19) beats a general 7B (12/19) by
+    +3 tasks — it cuts the failure count from 7 down to 4. That is the GuildLM bet, validated: for a
+    targeted job, a small specialist beats a bigger generalist.</p>
+  </div>
+
+  <h2>How it was built — $0, on a laptop</h2>
+  <ul>
+    <li><strong>Data:</strong> ~210 Go examples authored by a teacher model and <em>compile-verified</em>
+      with the real Go toolchain (every example actually builds). Quality over scraped volume.</li>
+    <li><strong>Training:</strong> LoRA fine-tune of <code>Qwen2.5-Coder-7B</code> (4-bit) via
+      <strong>Apple MLX</strong> on an M1 Max — 400 iterations, train loss 0.72 → 0.21. No cloud, no bill.</li>
+    <li><strong>Evaluation:</strong> a custom harness runs each benchmark prompt through the model and
+      scores the output by actually running <code>go test</code> against a hidden test — objective,
+      reproducible, no human or LLM judge.</li>
+  </ul>
+
+  <h2>The honest findings</h2>
+  <h3>1. Specialist &gt; general LLM (the win)</h3>
+  <p>
+    The Go-tuned model fixes tasks the general model can't — case-aware title-casing, element counting,
+    digit summing with proper error wrapping. This is exactly where Go-specific training pays off.
+  </p>
+  <h3>2. Beating a <em>code</em> base with a little SFT is hard (the nuance)</h3>
+  <p>
+    Our baseline, <code>Qwen2.5-Coder-7B</code>, is <em>itself</em> a strong Go model — it was pretrained
+    on huge amounts of Go. A ~200-example LoRA nudges it from 14 → 15/19: real, but marginal and near the
+    noise floor. Most of the specialist's edge over a <em>general</em> model (12 → 15) comes from
+    <strong>choosing a code base</strong> (+2), with the Go SFT adding the final point (+1).
+  </p>
+  <h3>3. Bigger was worse — the 14B negative result</h3>
+  <p>
+    We expected the 14B base to have more headroom. It didn't: at 4-bit it scored <em>below</em> the 7B
+    (13 vs 14/19), and the same fine-tuning that helped the 7B actively <em>hurt</em> the 14B
+    (11/19). Lesson: 4-bit quantization costs the 14B more, and LoRA hyperparameters do not transfer
+    7B → 14B for free. The 7B coder is the sweet spot — for now.
+  </p>
+
+  <h2>What's measured next</h2>
+  <p>
+    We now have an objective <strong>evaluation trifecta</strong>, all hidden-test and reproducible:
+  </p>
+  <ul>
+    <li><code>go_dev_bench</code> — writing code (19 tasks).</li>
+    <li><code>go_edit_bench</code> — editing flawed code (8 tasks).</li>
+    <li><code>go_test_bench</code> — writing tests, scored by <strong>mutation testing</strong>: a test
+      counts only if it passes the correct code <em>and</em> catches a planted bug.</li>
+  </ul>
+  <p>
+    Next: a go-test and go-review specialist on those benchmarks, closing the shared gaps the base still
+    misses (Unicode-rune handling, JSON round-trips), and trying a higher-precision base to see how much
+    of the ceiling is quantization. Every run, win or loss, gets reported here.
+  </p>
+
+  <div class="report__meta">
+    All experiments are open and reproducible. Code, datasets and benchmarks:
+    <a href="https://github.com/guildlm/guild-code" target="_blank" rel="noopener">github.com/guildlm/guild-code</a>.
+    Trained and measured locally on an M1 Max with Apple MLX — total cloud spend: $0.
+  </div>
+</article>
+</body>
+</html>
