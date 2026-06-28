@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #2 — Where specialization actually pays: the go-test model · GuildLM Research</title>
+<meta name="description" content="The go-test specialist catches more planted bugs than its base (8/13 vs 6/13) on a mutation-testing benchmark. A clearer win than code generation — and a lesson in where small-model specialization actually pays off.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #2 · 2026-06-28</div>
+  <h1>Where specialization actually pays: the go-test model</h1>
+  <p class="report__lede">
+    In <a href="2026-06-28-first-go-specialist.html">Report #1</a> the go-developer specialist barely
+    edged its already-strong code base. Today's go-<strong>test</strong> specialist tells a different,
+    more interesting story: on a benchmark that scores tests by whether they <em>actually catch bugs</em>,
+    the specialist beats the base by a clear margin. Specialization pays — but not equally for every task.
+  </p>
+
+  <h2>The result</h2>
+  <table>
+    <thead><tr><th>Model</th><th>Type</th><th class="score">bug-catch@1</th></tr></thead>
+    <tbody>
+      <tr class="win"><td>go-test <span class="tag-win">★</span></td><td>7B coder + test SFT (ours)</td><td class="score">8/13 · 62%</td></tr>
+      <tr><td>Qwen2.5-Coder-7B</td><td>7B code base (untuned)</td><td class="score">6/13 · 46%</td></tr>
+    </tbody>
+  </table>
+  <div class="report__callout">
+    <p><strong>+2 tasks, ~33% relative.</strong> The test-writing specialist writes tests that catch
+    bugs the base's tests miss — a clearer win than code generation, where the base is already near its
+    ceiling.</p>
+  </div>
+
+  <h2>What "bug-catch@1" means — mutation testing</h2>
+  <p>
+    Judging a test by reading it is subjective. So we score tests the way a strict reviewer would —
+    by <strong>mutation testing</strong>. For each task the model is asked to write a test for a
+    function, and the test earns a point only if it does <em>both</em>:
+  </p>
+  <ul>
+    <li><strong>passes</strong> against the correct implementation (the test is valid), and</li>
+    <li><strong>fails</strong> against a planted buggy mutant (the test actually catches the bug).</li>
+  </ul>
+  <p>
+    A test that trivially passes everything — common from weaker models — scores zero, because it never
+    catches the mutant. This is an objective, reproducible signal: no human, no LLM judge, just the Go
+    toolchain run twice per task.
+  </p>
+
+  <h2>The lesson: specialization is task-dependent</h2>
+  <p>
+    Put Report #1 and #2 side by side and a pattern appears:
+  </p>
+  <ul>
+    <li><strong>Code generation</strong> (go-dev): the coder base is already excellent — Go was a huge
+      part of its pretraining — so a few hundred SFT examples move it only marginally (+1 task).</li>
+    <li><strong>Test writing</strong> (go-test): a narrower <em>discipline</em> — cover the edge cases,
+      assert the boundaries, actually catch the bug. The base is <em>not</em> saturated here, so
+      targeted SFT helps more (+2 tasks, and a bigger relative jump).</li>
+  </ul>
+  <p>
+    This is the real shape of the GuildLM bet, sharpened by data: a small specialist's edge is biggest on
+    the focused, disciplined tasks — test writing, code review — and smallest on raw generation where a
+    strong code base already shines. Build the guild where it pays.
+  </p>
+
+  <h2>The evaluation trifecta</h2>
+  <p>Every GuildLM Go specialist is now measured by an objective, hidden-signal benchmark:</p>
+  <ul>
+    <li><code>go_dev_bench</code> (19) — generate code, scored by a hidden test.</li>
+    <li><code>go_edit_bench</code> (8) — fix flawed code, scored by a hidden test.</li>
+    <li><code>go_test_bench</code> (13) — write tests, scored by mutation (pass-correct + fail-mutant).</li>
+  </ul>
+  <p>
+    Next up: the go-review specialist on the edit benchmark, and pushing every model past the shared
+    gaps the base still misses. Reported here, win or loss, as we go.
+  </p>
+
+  <div class="report__meta">
+    Trained and measured locally on an M1 Max with Apple MLX — total cloud spend: $0. Code, datasets and
+    benchmarks: <a href="https://github.com/guildlm/guild-code" target="_blank" rel="noopener">github.com/guildlm/guild-code</a>.
+  </div>
+</article>
+</body>
+</html>
