@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #4 — On a harder benchmark, the picture sharpens · GuildLM Research</title>
+<meta name="description" content="We made the Go benchmark harder to cut measurement noise. The result is the clearest statement of the whole investigation: a code-specialized 7B beats a general one robustly — but the win comes from the base, not the fine-tuning.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #4 · 2026-06-28</div>
+  <h1>On a harder benchmark, the picture sharpens</h1>
+  <p class="report__lede">
+    Across Reports #1–#3 a suspicion grew: our benchmark was too easy, and the
+    differences we were measuring were mostly noise. So we made it harder — added
+    multi-step tasks that demand real logic (bracket matching, interval merging,
+    Roman numerals, run-length decoding, a Caesar cipher) — and re-ran the three
+    models. A harder test cuts noise, and the result is the cleanest statement of
+    the whole investigation.
+  </p>
+
+  <h2>The result (24-task go_dev_bench)</h2>
+  <table>
+    <thead><tr><th>Model</th><th>Type</th><th class="score">pass@1</th></tr></thead>
+    <tbody>
+      <tr class="win"><td>Qwen2.5-Coder-7B</td><td>code base (untuned)</td><td class="score">19/24 · 79%</td></tr>
+      <tr><td>go-dev (our SFT)</td><td>code base + Go SFT</td><td class="score">18/24 · 75%</td></tr>
+      <tr><td>Qwen2.5-7B-Instruct</td><td>general (non-coder)</td><td class="score">15/24 · 63%</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Two clean conclusions</h2>
+  <h3>1. Code-specialized &gt; general — robustly</h3>
+  <p>
+    Both code models clear the general one by a wide margin (+4 and +3) on the
+    harder set, where the general model stumbles on the multi-step tasks (counting,
+    digit summing, bracket balancing). The GuildLM thesis — a small model trained
+    for the domain beats a general model of the same size — holds, and holds more
+    convincingly the harder the task gets.
+  </p>
+  <h3>2. The win is the base, not our fine-tuning</h3>
+  <div class="report__callout">
+    <p><strong>On the hard tasks, the untuned base (19/24) edges our fine-tuned
+    model (18/24).</strong> Our ~200-example SFT, drawn from simpler functions,
+    slightly <em>degrades</em> the base on the hardest problems (Roman numerals,
+    RLE decoding) where its raw, pretraining-deep capability matters most.</p>
+  </div>
+  <p>
+    This is the central, hard-won finding of the whole arc — and it is not the one
+    we set out to prove. For Go <em>code generation</em>, the lever that matters is
+    <strong>choosing a code-specialized base over a general one</strong>. A few
+    hundred fine-tuning examples do not improve an already-strong coder; they only
+    helped on the one task the base was actually weak at — writing tests
+    (<a href="2026-06-28-go-test-mutation.html">Report #2</a>).
+  </p>
+
+  <h2>So where does the real gain come from?</h2>
+  <p>
+    Two places, both bigger than per-role fine-tuning:
+  </p>
+  <ul>
+    <li><strong>Base choice</strong> — a code base over a general one is a free,
+      deterministic +3 to +4. Start there.</li>
+    <li><strong>The agent algorithm</strong> — wrapping the model in a
+      compile-and-test feedback loop (generate → build → vet → test → fix), with
+      deterministic quality gates (no third-party imports, no cross-file
+      redeclaration, gofmt-clean, tests that actually assert). This is where a
+      small model is made <em>reliable</em>, and it's noise-free because the Go
+      toolchain is the judge.</li>
+  </ul>
+  <p>
+    We chased per-role fine-tuning hard, measured it honestly, and it pointed us
+    somewhere better. That's the point of keeping a public log: the data redirects
+    the work. Next, we double down on the agent loop and on benchmarks harder still.
+  </p>
+
+  <div class="report__meta">
+    All three models measured locally on an M1 Max with Apple MLX — total cloud
+    spend: $0. Code, datasets and benchmarks:
+    <a href="https://github.com/guildlm/guild-code" target="_blank" rel="noopener">github.com/guildlm/guild-code</a>.
+  </div>
+</article>
+</body>
+</html>
