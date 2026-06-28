@@ -44,7 +44,7 @@
     <tbody>
       <tr class="win"><td>go-test</td><td>mutation (bug-catch@1)</td><td class="score">8/13 vs 6/13</td><td><span class="tag-win">clear win +2</span></td></tr>
       <tr class="win"><td>go-dev</td><td>generate (pass@1)</td><td class="score">15/19 vs 14/19</td><td>marginal +1 (but +3 vs a general LLM)</td></tr>
-      <tr><td>go-review</td><td>edit (pass@1)</td><td class="score">3/8 vs 5/8</td><td><span class="tag-down">lost −2 — wrong benchmark</span></td></tr>
+      <tr><td>go-review</td><td>identify (identify@1)</td><td class="score">6/8 vs 7/8</td><td><span class="tag-down">lost −1 — base already strong</span></td></tr>
     </tbody>
   </table>
 
@@ -57,28 +57,44 @@
     <em>general</em> model, which is the real GuildLM claim (see <a href="2026-06-28-first-go-specialist.html">Report #1</a>).
   </p>
 
-  <h2>Lesson 2 — measure every specialist on its own job</h2>
+  <h2>Lesson 2 — measure every specialist on its own job (and follow the data even when it stings)</h2>
   <p>
-    <strong>go-review</strong> scored <em>below</em> its base on the edit benchmark — and that result is the
-    most useful of the three, because it exposed our own mistake. The edit benchmark asks for a clean
-    corrected file. But go-review was trained to write <em>reviews</em>: find the bug, explain why it's
-    wrong, then show the fix. Optimizing for explanation traded away some clean-code-emission, so on a
-    pure-edit metric it underperforms.
+    <strong>go-review</strong> scored <em>below</em> its base on the edit benchmark. Our first instinct
+    was that the benchmark was wrong: editing (emit a corrected file) is not reviewing (identify the
+    defect). So we built the right one — <code>go_review_bench</code>, which scores a review only if it
+    <em>names the real bug</em> — and re-ran it. The honest result:
   </p>
+  <table>
+    <thead><tr><th>Model</th><th>Review benchmark (identify@1)</th></tr></thead>
+    <tbody>
+      <tr><td>Qwen2.5-Coder-7B (base)</td><td class="score">7/8</td></tr>
+      <tr><td>go-review (tuned)</td><td class="score">6/8 <span class="tag-down">↓</span></td></tr>
+    </tbody>
+  </table>
   <div class="report__callout">
-    <p><strong>The benchmark was wrong, not the model.</strong> Editing is not reviewing. A review
-    specialist must be judged on whether it correctly <em>identifies</em> the bug — which needs a
-    dedicated review benchmark we haven't built yet. Reporting the mismatch is the honest move; quietly
-    swapping in a flattering number is not.</p>
+    <p><strong>It wasn't (only) the benchmark — the SFT genuinely didn't help.</strong> Even on its own
+    task, the tuned model loses to the base. The coder base is <em>already</em> an excellent Go reviewer,
+    and 73 review examples didn't add capability. We'd rather correct ourselves in public than leave a
+    flattering-but-wrong claim standing.</p>
   </div>
 
-  <h2>Lesson 3 — the value of a specialist is task-dependent</h2>
+  <h2>Lesson 3 — SFT helps only where the base is weak</h2>
   <p>
-    Put the three together and the shape of the bet is clear: a small specialist's edge is
-    <strong>largest on focused, disciplined work</strong> (testing, reviewing) and
-    <strong>smallest on raw generation</strong> where a strong code base already shines. The guild isn't
-    "train a model per role and assume each wins" — it's "build specialists where specialization pays, and
-    measure each on the job it actually does."
+    Line the three up and the real pattern is unmistakable:
+  </p>
+  <ul>
+    <li><strong>go-test</strong> — base 6/13, tuned <strong>8/13</strong>. The base is weakest at
+      test-writing, so SFT helps most. <span class="tag-win">+2</span></li>
+    <li><strong>go-dev</strong> — base 14/19, tuned <strong>15/19</strong>. Strong base, marginal gain.</li>
+    <li><strong>go-review</strong> — base 7/8, tuned <strong>6/8</strong>. The base is already a great
+      reviewer, so SFT is neutral-to-harmful. <span class="tag-down">−1</span></li>
+  </ul>
+  <p>
+    So a few hundred SFT examples do <em>not</em> blanket-improve a strong code base — they help only on
+    the task it's actually weak at. The real levers for "the world's best Go models" are: pick a
+    <strong>code base</strong> over a general one (proven: it beats a general LLM by +3), fine-tune on the
+    <strong>specific weak task</strong>, and — most of all — the <strong>agent algorithm</strong> that
+    wraps these models in a compile-and-test feedback loop. Brute-force per-role SFT is not it.
   </p>
 
   <h2>What's next</h2>
