@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #6 — Data was the lever: grounding beats the SFT at the project level · GuildLM Research</title>
+<meta name="description" content="We ran base vs specialist through the same agent loop on a real HTTP service. Both stall at 2/3. The fix was not a bigger model or the fine-tune — it was two retrieval examples. The corpus, not the algorithm, was the bottleneck.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #6 · 2026-06-29</div>
+  <h1>Data was the lever: grounding beats the SFT at the project level</h1>
+  <p class="report__lede">
+    <a href="2026-06-29-the-algorithm-runs.html">Report #5</a> showed the agent loop
+    writing a clean little package first try. This one asks the harder question the
+    mission actually cares about: on a real multi-file HTTP service, does the
+    trained specialist beat the raw base — and if neither nails it, what's the lever
+    that does? We ran four configurations through the <em>same</em> loop and let the
+    Go toolchain score every one.
+  </p>
+
+  <h2>The test: a small stdlib HTTP service</h2>
+  <p>
+    <code>kvservice</code> — a 4-file, standard-library-only key/value HTTP service
+    (an in-memory mutex-guarded store, an <code>http.ServeMux</code>, GET/PUT
+    endpoints, httptest tests). It's deliberately the case where a small 7B
+    stumbles: it reflexively reaches for a third-party router, and it gets modern
+    <code>net/http</code> status contracts (201 on create, 404 on missing) wrong.
+    Score is <code>score_backend</code>: build + vet + test, real toolchain, 0–3.
+  </p>
+
+  <h2>The result: three ways to score 2/3</h2>
+  <table>
+    <thead><tr><th>Configuration</th><th class="score">score_backend</th></tr></thead>
+    <tbody>
+      <tr><td>Base 7B only (no fine-tune)</td><td class="score">2/3</td></tr>
+      <tr><td>Specialists, role-routed (go-dev + go-test)</td><td class="score">2/3</td></tr>
+      <tr><td>Specialists + retrieval over the 212-example go_dev corpus</td><td class="score">2/3</td></tr>
+      <tr class="win"><td><strong>Specialists + 2 focused modern-ServeMux examples</strong></td><td class="score"><strong>3/3</strong></td></tr>
+    </tbody>
+  </table>
+  <p>
+    The first three all land in the same place: <code>build</code> and
+    <code>vet</code> pass — the deterministic import gate did its job, killing the
+    third-party-router reflex so every run stayed pure stdlib — but the tests fail
+    on the HTTP contract, and five fix rounds don't rescue it. The trained
+    specialist does <em>not</em> beat the base here. Per-role fine-tuning is again
+    not the project-level lever — the same conclusion
+    <a href="2026-06-28-harder-benchmark.html">Report #4</a> reached on benchmarks.
+  </p>
+
+  <h2>What actually moved the number</h2>
+  <div class="report__callout">
+    <p><strong>The corpus was the bottleneck, not the algorithm.</strong> Of the 212
+    examples in the go_dev retrieval set, exactly <strong>one</strong> uses a modern
+    ServeMux HTTP contract. Lexical retrieval almost never surfaces it, so the model
+    falls back on its pre-1.22 prior. Hand the loop just <em>two</em> compile- and
+    test-verified HTTP examples and it converges to <strong>3/3 in two fix
+    rounds</strong> — correct 201/404 handling, real assertions, still pure
+    stdlib.</p>
+  </div>
+  <p>
+    The mechanism is worth being precise about. The grounding examples did not force
+    a particular routing syntax — the model still wrote a classic
+    <code>HandleFunc("/kv/", …)</code> with a method switch. What they supplied was a
+    coherent, known-good <em>contract</em>: PUT returns 201, a missing GET returns
+    404, the test drives the handler with <code>httptest</code>. Once both the
+    implementation model and the test model are anchored to the same contract, they
+    agree — and the toolchain goes green.
+  </p>
+
+  <h2>Where this leaves the thesis</h2>
+  <p>
+    Capability = model × algorithm, and this report sharpens what "algorithm" means
+    when the base is fixed and small:
+  </p>
+  <ul>
+    <li><strong>Deterministic gates neutralize the base's reflexes.</strong> The
+      import gate alone turned the old 0/3 "it imports gorilla/mux" failure into a
+      reliable build+vet pass. That floor is now free.</li>
+    <li><strong>Retrieval grounding supplies missing knowledge — if the corpus
+      has it.</strong> Two right examples beat 212 mostly-irrelevant ones and beat
+      the fine-tune. The cheapest, highest-leverage investment is a small set of
+      verified examples for the contracts the base gets wrong.</li>
+    <li><strong>The fine-tune keeps not being the lever.</strong> At the project
+      level, as at the benchmark level, base choice + the algorithm carry the
+      result. The SFT earns its place only where the base is genuinely weak (writing
+      tests — <a href="2026-06-28-go-test-mutation.html">Report #2</a>).</li>
+  </ul>
+  <p>
+    So the next investment is obvious and it isn't a bigger GPU bill: grow the
+    retrieval corpus with verified examples of the exact contracts small models get
+    wrong. Data was the lever all along.
+  </p>
+
+  <div class="report__meta">
+    All four configurations served and run locally on an M1 Max with Apple MLX —
+    total cloud spend: $0. The spec, the verified retrieval corpus and the agent
+    loop:
+    <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
+  </div>
+</article>
+</body>
+</html>
