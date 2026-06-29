@@ -90,6 +90,27 @@
     agree — and the toolchain goes green.
   </p>
 
+  <h2>It generalizes: a second contract, same result</h2>
+  <p>
+    One spec is an anecdote. So we repeated the experiment on a different contract
+    the small base also gets wrong — a stdlib JSON endpoint (<code>jsonapi</code>:
+    POST <code>/echo</code>, decode JSON, validate, respond with JSON and the right
+    status codes). Same shape of result:
+  </p>
+  <table>
+    <thead><tr><th>Spec</th><th>Contract</th><th class="score">no grounding</th><th class="score">+ 2 verified examples</th></tr></thead>
+    <tbody>
+      <tr><td>kvservice</td><td>HTTP routing &amp; status</td><td class="score">2/3</td><td class="score win">3/3</td></tr>
+      <tr><td>jsonapi</td><td>JSON encode/decode &amp; status</td><td class="score">2/3</td><td class="score win">3/3 (first try)</td></tr>
+    </tbody>
+  </table>
+  <p>
+    Two distinct contracts, the same lift, from the same cheap intervention. The
+    pattern isn't about one library quirk — it's that a small model writes a
+    correct, tested backend the moment it's grounded in a known-good example of the
+    contract it's being asked to honour.
+  </p>
+
   <h2>Where this leaves the thesis</h2>
   <p>
     Capability = model × algorithm, and this report sharpens what "algorithm" means
@@ -115,9 +136,9 @@
   </p>
 
   <div class="report__meta">
-    All four configurations served and run locally on an M1 Max with Apple MLX —
-    total cloud spend: $0. The spec, the verified retrieval corpus and the agent
-    loop:
+    Every configuration across both specs served and run locally on an M1 Max with
+    Apple MLX — total cloud spend: $0. The specs, the verified retrieval corpora and
+    the agent loop:
     <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
   </div>
 </article>
