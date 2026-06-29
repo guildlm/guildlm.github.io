@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #5 — The algorithm runs: specialists + agent loop = a green backend · GuildLM Research</title>
+<meta name="description" content="We served two trained Go specialists ($0, local MLX) and ran the full Builder agent loop with role-routing. It writes a verified backend first try. A second spec exposes where the remaining gap really is: the base model's knowledge, not the scaffolding.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #5 · 2026-06-29</div>
+  <h1>The algorithm runs: specialists + agent loop = a green backend</h1>
+  <p class="report__lede">
+    The previous four reports measured models on benchmarks. This one runs the
+    actual product: two trained Go specialists, each served as a live endpoint,
+    wired into the Builder's agent loop with <em>role-routing</em> — one model
+    writes the implementation, a different one writes the tests. The whole thing
+    runs on an M1 Max with Apple MLX. Cloud spend: still $0. We asked it for a
+    small Go package and watched what came out.
+  </p>
+
+  <h2>The setup: a guild, not a model</h2>
+  <p>
+    Two LoRA-tuned specialists over the same <code>Qwen2.5-Coder-7B</code> base,
+    each served OpenAI-compatible via <code>mlx_lm.server</code>:
+  </p>
+  <ul>
+    <li><strong>go-dev</strong> on <code>:8080</code> — writes implementation files.</li>
+    <li><strong>go-test</strong> on <code>:8081</code> — writes <code>*_test.go</code> files.</li>
+  </ul>
+  <p>
+    The Builder decomposes a spec into files, routes each file to the specialist
+    that owns it, and runs the verification loop: generate → <code>go build</code>
+    → <code>vet</code> → <code>test</code> → fix, with deterministic quality gates
+    (stdlib-only imports, no cross-file redeclaration, gofmt-clean, tests that
+    actually assert). The headline metric is <code>score_backend</code>: does the
+    whole generated project build, vet and test with the real Go toolchain.
+  </p>
+
+  <h2>The result: first-try green</h2>
+  <p>
+    Given a 3-file spec for <code>numkit</code> (a pure-stdlib package with
+    <code>GCD</code> and <code>Clamp</code> plus table-driven tests), the guild
+    produced a working, verified backend <strong>on the first pass — no fix
+    rounds, 17 seconds</strong>:
+  </p>
+  <table>
+    <thead><tr><th>Stage</th><th class="score">Result</th></tr></thead>
+    <tbody>
+      <tr class="win"><td>go build</td><td class="score">✓</td></tr>
+      <tr class="win"><td>go vet</td><td class="score">✓</td></tr>
+      <tr class="win"><td>go test</td><td class="score">✓</td></tr>
+      <tr class="win"><td><strong>score_backend</strong></td><td class="score"><strong>3/3</strong></td></tr>
+    </tbody>
+  </table>
+  <p>
+    The implementation was correct on the tricky edges — <code>GCD(0,0)=0</code>,
+    negative operands via <code>abs</code>, <code>Clamp</code> with inverted bounds
+    returning the input unchanged. The test specialist wrote a real table covering
+    coprimes, a common factor, a zero operand, negatives, and clamp boundaries —
+    with genuine <code>t.Errorf</code> assertions, all passing. Two models that
+    never share a context window, cooperating into one green package. That is the
+    bet — <em>capability = model × algorithm</em> — working end to end.
+  </p>
+
+  <h2>The honest part: where it broke, and why</h2>
+  <p>
+    We first ran the same pipeline on <code>stringkit</code> — <code>Reverse</code>
+    and <code>IsPalindrome</code> with unicode test cases. The implementation was
+    <strong>flawless</strong> (<code>go build</code> green immediately). But the
+    suite failed, and it kept failing through every fix round. The reason is worth
+    the whole report:
+  </p>
+  <div class="report__callout">
+    <p><strong>The test specialist encoded factually wrong expectations and could
+    not be argued out of them.</strong> It asserted that
+    <code>Reverse("こんにちは")</code> equals itself — it does not — and that a
+    katakana string was a palindrome when it is not. The implementation was right;
+    the <em>test</em> was wrong.</p>
+  </div>
+  <p>
+    We threw the algorithm at it. Best-of-N resampling, fifteen candidates across
+    five fix rounds — every single sample re-emitted the same wrong value. We
+    cross-routed the repair to the <em>other</em> specialist (go-dev), explicitly
+    told it "the implementation is correct, fix the expected value" — it produced
+    the identical wrong expectation. The tell: both adapters share one
+    <code>Qwen2.5-Coder-7B</code> base, and that base simply does not know how a
+    unicode string reverses. No amount of scaffolding around a model can supply
+    knowledge the model does not have.
+  </p>
+  <p>
+    This is a clarifying failure, not a discouraging one. The algorithm did its
+    job: it <strong>localized</strong> the fault to the test file (the build was
+    green; only the assertion failed) and refused to corrupt a correct
+    implementation to satisfy a wrong test. The residual gap is a
+    <strong>base-model knowledge limit</strong>, not an algorithm limit — the same
+    lesson <a href="2026-06-28-harder-benchmark.html">Report #4</a> reached from the
+    benchmark side, now reached from the product side.
+  </p>
+
+  <h2>Two upgrades the demo earned</h2>
+  <p>
+    Running the real loop surfaced two concrete improvements, both now shipped and
+    unit-tested in the Builder:
+  </p>
+  <ul>
+    <li><strong>A goimports gate.</strong> The most common small-model failure is a
+      single dead <code>import</code> that blocks the entire compile. We made file
+      formatting prefer <code>goimports</code> over <code>gofmt</code>, so unused
+      imports are pruned <em>deterministically</em> — no model fix-round spent on a
+      one-line cleanup the toolchain can do for free. (On <code>stringkit</code>
+      this alone turned the implementation green.)</li>
+    <li><strong>Verification-guided fix selection.</strong> Best-of-N during repair
+      used to keep the first candidate that <em>parses</em>. Now it keeps the first
+      candidate that actually makes <code>go build/vet/test</code> pass — the
+      ground-truth signal applied at selection time, not just after. A model that
+      keeps re-emitting a broken fix gets out-voted by the one sample that goes
+      green.</li>
+  </ul>
+
+  <h2>Where this leaves the thesis</h2>
+  <p>
+    Four reports established that for Go code-gen the base matters more than
+    per-role fine-tuning. This one shows the other half: once you have a decent
+    base, the <em>algorithm</em> — decompose, role-route, verify, gate, loop — turns
+    two small 7B specialists into a system that writes a correct, tested backend on
+    the first try. And when it can't, it fails in the honest direction: it tells you
+    the gap is in the model's knowledge, and points the next investment (a stronger
+    code base, or oracle-grounded repair) at the right place.
+  </p>
+
+  <div class="report__meta">
+    Specialists served and the full Builder loop run locally on an M1 Max with
+    Apple MLX — total cloud spend: $0. The agent loop, gates and specs:
+    <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
+  </div>
+</article>
+</body>
+</html>
