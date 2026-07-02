@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #7 — The algorithm scales: a six-package production backend from a 7B · GuildLM Research</title>
+<meta name="description" content="Same 7B model, no retraining. We climbed the project-size ladder from 7 files to a 16-file, six-package production-shaped Go backend by turning every recurring failure into a deterministic gate. Three specs went fully-autonomous green; the fourth stopped 20 human lines short — and the gap tells us exactly what the model half still owes.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #7 · 2026-07-02</div>
+  <h1>The algorithm scales: a six-package production backend from a 7B</h1>
+  <p class="report__lede">
+    <a href="2026-06-29-data-was-the-lever.html">Report #6</a> ended with 3–4 file
+    specs and a thesis: with a small, fixed model, the loop and its data are the
+    lever. This report pushes that thesis up the only axis that matters for the
+    mission — project size. Same 7B specialist the whole way (go-dev-mixed-v2, at
+    base parity on the unit benchmark, never retrained), same Builder loop, and a
+    ladder of increasingly real backends. The question: where does it break, and is
+    the break in the algorithm or the model?
+  </p>
+
+  <h2>The ladder</h2>
+  <table>
+    <thead><tr><th>Spec</th><th>Files / packages</th><th>Shape</th><th class="score">Autonomous</th></tr></thead>
+    <tbody>
+      <tr><td><code>usersapi</code></td><td>7 / 1</td><td>REST users API: repository, middleware chain, JSON handlers, graceful shutdown</td><td class="score">3/3</td></tr>
+      <tr><td><code>taskflow</code></td><td>11 / 1</td><td>Layered: errors→models→store→middleware→pagination→handlers→router→main</td><td class="score">3/3</td></tr>
+      <tr><td><code>taskapi</code></td><td>13 / 5</td><td>Real multi-package: cmd/server + internal/{config,models,store,api}, interface DI, slog, Go 1.22 routing</td><td class="score">3/3</td></tr>
+      <tr class="win"><td><code>taskapipro</code></td><td>16 / 6</td><td>+ service layer, pagination, /healthz + /readyz, config validation, context-aware store/service</td><td class="score">2/3 → 3/3<sup>†</sup></td></tr>
+    </tbody>
+  </table>
+  <p>
+    Score is <code>score_backend</code> as always: <code>go build</code> +
+    <code>go vet</code> + <code>go test</code>, real toolchain, 0–3.
+    <sup>†</sup>The asterisk on taskapipro is the honest part; it gets its own
+    section below.
+  </p>
+
+  <h2>What made multi-package work: the Builder learned what a package is</h2>
+  <p>
+    The jump from 11 files in one package to 13 files in five is where naive
+    file-at-a-time generation dies: cross-package references need imports and
+    qualifiers, same-named symbols in different packages are legal, and only
+    exported identifiers cross the boundary. The Builder became package-aware —
+    package = directory; same-directory files are shown in full while other
+    packages appear as their <em>exported API only</em> (signatures, not bodies),
+    exactly how a human reads a codebase. Redeclaration-stripping and sibling
+    context were scoped to the directory so a legitimate <code>New()</code> in two
+    packages isn't "repaired" away.
+  </p>
+  <p>
+    The result surprised us: on <code>taskapi</code>'s first run the whole
+    five-package architecture — every import path, every qualified reference,
+    every package clause, the config→models→store→api→cmd dependency graph —
+    <strong>compiled clean on the first try</strong>. The hard part of
+    multi-package wasn't hard once the prompts carried the right context.
+  </p>
+
+  <h2>Every failure class became a deterministic gate</h2>
+  <p>
+    Ten runs up the ladder surfaced failure modes one at a time — and each became
+    a permanent, model-free repair or prompt rule. The pattern that keeps
+    repeating: a 7B's mistakes are not random noise, they're <em>enumerable
+    mechanical classes</em>, and every class you close deterministically is closed
+    forever, for free:
+  </p>
+  <ul>
+    <li><strong>Truncation:</strong> the serving default silently cut the biggest
+      file mid-statement (fixed max_tokens; strip orphan code fences).</li>
+    <li><strong>Redeclaration collapse:</strong> a file re-declares a sibling's
+      symbols and the fix loop bounces forever (deterministic
+      <code>strip_redeclarations</code>).</li>
+    <li><strong>Cross-package misqualification:</strong> <code>service.ErrExists</code>
+      when the sentinel lives in <code>store</code>; bare unqualified calls; and
+      the killer — goimports <em>cannot</em> add local-module imports, so the
+      Builder adds them itself (<code>_requalify_undefined</code> +
+      <code>_ensure_import</code>).</li>
+    <li><strong>The oscillation:</strong> the deterministic pass adds the import,
+      the same round's model fix regenerates the file and drops it again —
+      forever. Fixed twice: requalified files are excluded from that round's model
+      targets, and their imports are <em>pinned</em> — re-added after every later
+      model edit.</li>
+    <li><strong>Assignment arity:</strong> <code>2 variables but f returns 1
+      value</code> — blank <code>_</code> identifiers are dropped or padded;
+      named variables are never touched.</li>
+    <li><strong>Root-cause blindness:</strong> a failing assertion always pointed
+      the fix loop at the <em>test</em> file, so a genuinely-wrong implementation
+      could never be repaired. Now a package that keeps failing at runtime pulls
+      its implementation files into the fix targets too.</li>
+    <li>Plus prompt rules with teeth: Go 1.22 ServeMux method-routing, no
+      interface-by-pointer, full method implementations (no stubs), never shadow
+      <code>*testing.T</code>, fresh fixtures per subtest.</li>
+  </ul>
+
+  <h2>The honest gap: taskapipro stopped 20 human lines short</h2>
+  <p>
+    Three full autonomous runs of the six-package spec all landed at exactly 2/3 —
+    <strong>all six packages build and vet clean every time</strong>, and the
+    failures were the <em>same two test-semantics bugs</em> each run, down to the
+    line. That reproducibility is the finding. The model wrote correct
+    env-with-default helpers for five of six config fields and missed the same one
+    every time; its table test correctly isolates state per subtest (the fix-time
+    diagnosis landed) but keeps expected values that assume the old shared-store
+    accumulation. The fix loop, even pointed at the right files with the right
+    diagnosis, could not make those two <em>semantic expected-value</em> repairs —
+    and a <code>maintain</code> pass asked to make both fixes dug a fresh hole in
+    the service layer and was correctly rolled back by the non-regressing gate.
+  </p>
+  <p>
+    So we finished it by hand and counted: <strong>~20 lines of human edits in
+    1,225</strong> (one missing default helper; three corrected expected values
+    plus the coverage the table shape couldn't express), documented line-by-line
+    in the artifact's <code>HUMAN_EDITS.md</code>. <code>go build</code>,
+    <code>go vet</code>, <code>go test -race</code>: green across all six
+    packages, including the model's own router, service and config tests.
+  </p>
+
+  <h2>What we learned</h2>
+  <ul>
+    <li><strong>The algorithm was the scaling lever, full stop.</strong> The model
+      never changed. 7→11→13→16 files and 1→6 packages came entirely from
+      package-aware context, verified retrieval, and deterministic gates.</li>
+    <li><strong>Mechanical failure is a solved genre.</strong> Compile-level
+      correctness across six packages is now routine for a 7B — every mechanical
+      class we met is gated. What's left standing is different in kind.</li>
+    <li><strong>The residual is semantic, and it's the model's half.</strong>
+      Deriving a consistent set of expected values — "what should this return,
+      given everything else I wrote" — resisted every prompt and every loop we
+      have. That's not a gate; that's knowledge and reasoning. It's exactly the
+      half we're now attacking from the other side: domain-adaptive pretraining
+      of the base on ~45M tokens of real, high-star Go — running on a free cloud
+      GPU as this report is written.</li>
+  </ul>
+
+  <div class="report__meta">
+    All builds served and run locally on an M1 Max with Apple MLX — total cloud
+    spend: $0 (the DAPT run uses a free Kaggle GPU). Specs, gates, the
+    package-aware Builder and the green artifacts:
+    <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
+  </div>
+</article>
+</body>
+</html>
