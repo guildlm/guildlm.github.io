@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #8 — The model's half wasn't training, it was retrieval · GuildLM Research</title>
+<meta name="description" content="Report #7 blamed the last gap on the model's knowledge and bet on domain-adaptive pretraining. We ran the bet. Both DAPT recipes came back net-negative and a four-times-bigger base was rejected — while the exact semantic gap that needed 20 hand-written lines fell to two verified retrieval examples, model unchanged. The moat is the algorithm.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #8 · 2026-07-04</div>
+  <h1>The model's half wasn't training — it was retrieval</h1>
+  <p class="report__lede">
+    <a href="2026-07-02-the-algorithm-scales.html">Report #7</a> ended on a bet.
+    Three of four backends went fully autonomous; the fourth,
+    <code>taskapipro</code>, stopped ~20 hand-written lines short, and we called
+    the residual "the model's half — semantic expected values, knowledge and
+    reasoning," and said it was "now in (free-GPU) training." This report reports
+    the bet. We ran the knowledge lever head-on — two rounds of domain-adaptive
+    pretraining and a four-times-bigger base — and it came back negative on every
+    axis that matters. Then the exact same gap fell to <strong>two examples in a
+    text file</strong>, model unchanged. The half we blamed on the model was
+    retrieval-shaped all along.
+  </p>
+
+  <h2>The knowledge lever, tried three ways</h2>
+  <p>
+    If the residual really were missing Go knowledge, the fix is to put knowledge
+    into the weights. We tried the two obvious ways — adapt the base on real Go,
+    or swap in a bigger, newer base — and measured both against the same 48-task
+    unit benchmark and the same Builder project runs. Everything is local, MLX,
+    <strong>$0</strong> (the DAPT runs use a free Kaggle GPU).
+  </p>
+  <table>
+    <thead><tr><th>Lever</th><th>What we did</th><th class="score">Verdict</th></tr></thead>
+    <tbody>
+      <tr><td><strong>DAPT&nbsp;·&nbsp;recipe&nbsp;1</strong></td><td>Pure next-token continued-pretraining on ~5–10M tokens of top-star Go, then the same SFT on top</td><td class="score">net-negative</td></tr>
+      <tr><td><strong>DAPT&nbsp;·&nbsp;recipe&nbsp;2</strong></td><td>Replay-mix: the Go corpus interleaved with chat-templated instruct docs to protect instruction-following, then the same SFT</td><td class="score">net-negative</td></tr>
+      <tr><td><strong>Bigger base</strong></td><td>Qwen3-Coder-30B-A3B (MoE, ~3B active) in place of the 7B, everything else identical</td><td class="score">rejected</td></tr>
+    </tbody>
+  </table>
+  <p>
+    <strong>DAPT recipe 1</strong> reached exact unit <em>parity</em> with SFT-only
+    (the continued-pretraining added no measurable capability at this token budget)
+    — and at the project level it collapsed <code>taskapi</code> to 0/3 across four
+    separate checkpoints, each a distinct instruction-following failure (method
+    re-declaration, files ballooning past their length and truncating mid-string,
+    Go code written into <code>go.mod</code>). Next-token training on a tiny
+    fraction of a real DAPT budget degrades the instruct model's format discipline
+    faster than it adds knowledge, and SFT-on-top can't fully repair it.
+  </p>
+  <p>
+    <strong>DAPT recipe 2</strong> was built to fix exactly that — keep the chat
+    behaviour alive by replaying instruct data through the pretraining stream. It
+    helped at the margin (the raw adapted model was partially, not totally, broken)
+    but the honest number is blunt: <code>DAPT-replay + SFT</code> scored
+    <strong>25/48</strong> on the unit bench versus <strong>31/48</strong> for the
+    identical SFT recipe on the vanilla base. Same data, same recipe, only the base
+    differs — so the adaptation <em>subtracted</em> six points. The purpose of DAPT
+    is a knowledge gain; capability went down. Both recipes are closed.
+  </p>
+
+  <h2>A four-times-bigger base, rejected</h2>
+  <p>
+    So try raw size. Qwen3-Coder-30B-A3B is a newer, mixture-of-experts coder,
+    roughly four times the parameters of our 7B. On the unit benchmark it landed at
+    36/48 (about 38–40 once you let goimports strip the spurious unused imports it
+    likes to write) — <em>at parity</em> with the untuned 7B's 39, not ahead. And
+    on the actual job it lost outright: pointed at <code>taskapi</code> — the spec
+    our 7B champion finishes 3/3 in ten minutes — the 30B <strong>exhausted all
+    seven fix rounds at 0/3, in thirty</strong>, three times slower, undone by a
+    self-inflicted spec violation (it defined the <code>Task</code> and
+    <code>Project</code> types twice, in two different packages). More parameters,
+    no better at the project; the base stays the 7B.
+  </p>
+
+  <h2>The dissociation that keeps showing up</h2>
+  <p>
+    Line the runs up and the same split appears every time: unit-benchmark
+    capability does <em>not</em> predict who finishes the multi-package build.
+  </p>
+  <table>
+    <thead><tr><th>Model on <code>taskapi</code></th><th class="score">Unit&nbsp;bench</th><th class="score">Project</th></tr></thead>
+    <tbody>
+      <tr><td>Base 7B, untuned</td><td class="score">39/48</td><td class="score">0/3</td></tr>
+      <tr><td>Qwen3-Coder-30B, untuned</td><td class="score">~39/48</td><td class="score">0/3</td></tr>
+      <tr class="win"><td>7B + SFT (our champion)</td><td class="score">31/48</td><td class="score">3/3</td></tr>
+    </tbody>
+  </table>
+  <p>
+    The two strongest models on isolated single-function tasks are the two that
+    <em>can't finish the backend</em>. Our SFT adapter is six points weaker on the
+    unit bench and wins the project 3/3. Its value was never raw Go ability — it's
+    <strong>format and spec cooperativeness</strong>: honouring the package
+    layout, the cross-file contract, the "one file, no commentary" discipline the
+    Builder depends on. Bigger, smarter, untuned models simply don't cooperate, and
+    the unit bench can't see the difference.
+  </p>
+
+  <h2>What actually closed the gap: two examples</h2>
+  <p>
+    With the knowledge levers spent, we looked again at <em>why</em>
+    <code>taskapipro</code> stuck at 2/3. The residual wasn't diffuse "reasoning" —
+    it was two concrete, recurring implementation bugs: a config loader that read
+    <code>ADDR</code> from the environment but never supplied the <code>:8080</code>
+    default, and an in-memory store whose <code>Create</code> never returned
+    <code>ErrExists</code> on a duplicate. Both are <em>patterns</em>, not
+    puzzles. So we wrote them down — two small Go files, each verified
+    <code>go test</code>-green in isolation, added as few-shot examples to the
+    Builder's retrieval corpus (14 → 16):
+  </p>
+  <ul>
+    <li>a <strong>config loader with env-var defaults + validation</strong> —
+      <code>getenv(key, fallback)</code>, <code>Addr</code> defaulting to
+      <code>:8080</code>, duration/int parsing, a <code>Validate()</code>;</li>
+    <li>an <strong>in-memory CRUD store</strong> with <code>ErrNotFound</code> /
+      <code>ErrExists</code> sentinels (<code>Create</code> returns
+      <code>ErrExists</code> on a duplicate id), sorted <code>List</code>, and a
+      table test that builds a <em>fresh store per subtest</em>.</li>
+  </ul>
+  <p>
+    Nothing else changed — same <code>go-dev-mixed-v2</code> 7B, same gates. The
+    retriever is plain token overlap between each example's description and the
+    file being written, so the config example surfaces for the config file and the
+    store example for the store. We re-ran <code>taskapipro</code>.
+  </p>
+  <p class="report__result">
+    <strong>Autonomous 3/3.</strong> <code>go build</code> + <code>go vet</code> +
+    <code>go test -race</code>, green across all six packages, deterministic
+    convergence at fix round 3, ~18 minutes. The unchanged model wrote
+    <code>getenv("ADDR", ":8080")</code> and the <code>ErrExists</code>-on-duplicate
+    check itself, lifted straight from the retrieved patterns — the same two bugs
+    that needed hand edits a session ago, now written correctly on the first pass.
+  </p>
+  <p>
+    We also checked whether the last recurring failure class — the 7B's buggy
+    tests — could be routed away to a dedicated go-test specialist. On its own
+    mutation benchmark that specialist genuinely beats base (11/18 vs 7/18 at
+    writing a test that catches an injected bug — unlike impl-generation, the
+    narrower test-writing skill <em>does</em> respond to fine-tuning). But routing
+    left <code>taskapipro</code> at 2/3: its binding constraint was the
+    implementation, not the tests. The stricter specialist tests only made the impl
+    bug easier to see — which is exactly what retrieval then fixed.
+  </p>
+
+  <h2>What we learned</h2>
+  <ul>
+    <li><strong>The knowledge lever didn't pay at this scale.</strong> Two DAPT
+      recipes net-negative, a 4× base rejected. Continued-pretraining on a hobby
+      token budget costs more instruction-following than it buys in Go knowledge,
+      and raw size buys unit-bench points that don't convert to finished
+      backends.</li>
+    <li><strong>Unit capability is the wrong dashboard.</strong> The models that
+      top the single-function benchmark are the ones that can't ship the project.
+      What the Builder needs from the model is cooperativeness, and only the SFT
+      adapter has it.</li>
+    <li><strong>The "model's half" was retrieval-shaped.</strong> Report #7's
+      semantic residual looked like something you'd have to pretrain away. It
+      wasn't. It was two named patterns, and putting them in a text file the model
+      can copy from closed the gap that DAPT and a bigger base could not.</li>
+    <li><strong>The moat is the algorithm.</strong> Every backend on the ladder —
+      <code>usersapi</code>, <code>taskflow</code>, <code>taskapi</code>, and now
+      <code>taskapipro</code> — is fully autonomous 3/3 on the same unchanged 7B.
+      The wins came from context, gates, and verified retrieval, and every one of
+      them was free.</li>
+  </ul>
+
+  <div class="report__meta">
+    All models served and run locally on an M1 Max with Apple MLX; DAPT on a free
+    Kaggle GPU — total cloud spend: $0. Specs, gates, the verified retrieval corpus
+    and the green artifacts:
+    <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
+  </div>
+</article>
+</body>
+</html>

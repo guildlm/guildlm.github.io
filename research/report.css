@@ -43,6 +43,15 @@
   border-bottom: 1px solid var(--border-subtle);
 }
 
+.report__result {
+  margin: 1.6rem 0;
+  padding: 1.1rem 1.3rem;
+  border-left: 3px solid var(--gold-500);
+  background: rgba(212, 175, 55, 0.06);
+  border-radius: 0 6px 6px 0;
+  color: var(--text-primary);
+}
+
 .report h2 {
   font-size: 1.4rem;
   margin: 2.8rem 0 1rem;
