@@ -34,6 +34,19 @@
     said (wins <em>and</em> losses). All runs are local, $0, and reproducible.
   </p>
 
+  <a class="logentry" href="2026-07-07-the-wheel-closes.html">
+    <div class="logentry__date">2026-07-07 · Report #9</div>
+    <div class="logentry__title">The wheel closes: the model learns from its own verified output</div>
+    <div class="logentry__desc">
+      Eight reports said the moat is the algorithm, not the model — but the goal is the best
+      Go model. So we closed the loop: the Builder's compiler-verified green runs become training
+      data and the model learns from its own output. Turn one regressed (14 pairs → 26/48); with
+      diversity and a longer budget, turn two passed the champion — 33/48 vs 31/48 on the unseen
+      bench, and still 3/3 on the project, converging cleaner. The first net gain from on-policy
+      self-distillation, at $0.
+    </div>
+  </a>
+
   <a class="logentry" href="2026-07-04-the-models-half-was-retrieval.html">
     <div class="logentry__date">2026-07-04 · Report #8</div>
     <div class="logentry__title">The model's half wasn't training — it was retrieval</div>

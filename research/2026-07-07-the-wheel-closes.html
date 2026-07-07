@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #9 — The wheel closes: the model learns from its own verified output · GuildLM Research</title>
+<meta name="description" content="Eight reports said the moat is the algorithm, not the model. But the goal is the best Go model. So we closed the loop: the Builder's compiler-verified green runs become training data, and the model learns from its own best output. The first attempt regressed; with diversity and a longer budget the second passed the champion — 33/48 vs 31/48 on the unseen bench, project cooperativeness intact. The first net gain from on-policy self-distillation, at $0.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #9 · 2026-07-07</div>
+  <h1>The wheel closes — the model learns from its own verified output</h1>
+  <p class="report__lede">
+    <a href="2026-07-04-the-models-half-was-retrieval.html">Report #8</a> ended on a
+    hard-won conclusion: the moat is the algorithm, not the model — retrieval and
+    gates cracked the frontier that pretraining and a 4× base could not. True. But
+    it leaves an itch, because the actual goal is <em>the best Go model</em>, and
+    the model had spent five reports refusing to improve. So we asked a different
+    question: can the model get better from <strong>its own output</strong> — no
+    teacher, no new human data, no cloud, no dollars? Every time the Builder
+    finishes a spec, it has produced something rare: a prompt paired with a
+    <strong>compiler-verified</strong> answer. Feed those back and the algorithm
+    that surrounds the model becomes a data pump for the model itself. The first
+    turn of that wheel regressed. The second passed the champion.
+  </p>
+
+  <h2>The wheel</h2>
+  <p>
+    On-policy self-distillation, built entirely out of parts we already had. The
+    Builder runs a spec; with tracing on, every file it writes is logged as a
+    <code>(prompt → file)</code> pair. A harvester keeps only the pairs from runs
+    that ended <strong>green</strong> — <code>go build</code> + <code>go vet</code>
+    + <code>go test&nbsp;-race</code> all passing across every package — so the
+    training signal is never "what the model said," only "what the model said
+    <em>that the compiler and the tests both accepted</em>." A prep step prunes
+    each prompt down to the training budget (the retrieval examples are dropped on
+    purpose — the point is to bake the contracts into the weights, not to keep
+    leaning on the corpus), and the survivors are mixed back into the same SFT
+    recipe that made the champion. The model trains on its own best, verified,
+    on-policy work. Cost: <strong>$0</strong>, local, on an M1 Max.
+  </p>
+
+  <h2>Turn one regressed — honestly</h2>
+  <p>
+    The first build of the wheel (call it <code>v3</code>) harvested a thin,
+    low-temperature farm: <strong>14</strong> distilled pairs, oversampled and
+    trained at a 2048-token sequence length. The number told the story before the
+    bench did — at greedy temperature the Builder writes nearly the same files
+    every run, so "more rounds" bought almost no new data. Trained on those 14, the
+    model <em>memorised a narrow slice</em> and lost ground on everything unseen:
+    <strong>26/48</strong> on the 48-task unit benchmark, five points under the
+    31/48 champion it was built from. A clean negative, and a clear diagnosis:
+    distillation with no diversity is just overfitting with extra steps.
+  </p>
+
+  <h2>Turn two: diversity, and a budget that fits</h2>
+  <p>
+    Two changes, both aimed at the same failure. First, <strong>diversity</strong>:
+    re-run the farm at sampling temperature 0.35 so the green trajectories actually
+    differ — genuine new pairs instead of byte-identical reruns. Second, a
+    <strong>budget that keeps them</strong>: train at a 4096-token sequence length
+    so the longer, real Builder prompts survive pruning instead of being dropped.
+    The harvest went from 14 usable pairs to <strong>58</strong> — three times the
+    data, and longer. Same base SFT mixture, same recipe, only the distilled slice
+    changed. We measured the result three ways: the unseen unit bench, a spec the
+    model <em>had</em> trained on, and a spec held out entirely.
+  </p>
+  <table>
+    <thead><tr><th>Model</th><th>Distilled data</th><th class="score">Unit bench (unseen)</th></tr></thead>
+    <tbody>
+      <tr><td>Base 7B, untuned</td><td>—</td><td class="score">39/48</td></tr>
+      <tr><td>SFT champion (<code>v2</code>)</td><td>none</td><td class="score">31/48</td></tr>
+      <tr><td>Self-distilled <code>v3</code></td><td>14 pairs · seq&nbsp;2048</td><td class="score">26/48</td></tr>
+      <tr class="win"><td>Self-distilled <code>v4</code></td><td>58 pairs · seq&nbsp;4096</td><td class="score">33/48</td></tr>
+    </tbody>
+  </table>
+  <p class="report__result">
+    <strong>33/48.</strong> The wheel didn't just undo <code>v3</code>'s
+    regression — it put the model <strong>two points past the champion it was
+    distilled from</strong>, on a benchmark of tasks that appear nowhere in its
+    training data. The model taught itself something that generalises, from output
+    it had generated and the compiler had verified. This is the first time in nine
+    reports that <em>the model</em> — not the scaffolding around it — measurably
+    moved the number in the right direction.
+  </p>
+
+  <h2>Did it keep the job it already had?</h2>
+  <p>
+    A unit-bench gain is worthless if it costs the format and spec cooperativeness
+    that Report #8 showed is the SFT adapter's whole reason to exist. So we re-ran
+    the project metric. On <code>taskapi</code> — the five-package backend the
+    champion finishes 3/3 — <code>v4</code> went <strong>3/3 as well, and cleaner</strong>:
+    all three runs converged with <em>deterministic fixes only</em>, zero model-fix
+    rounds, where the champion had needed two.
+  </p>
+  <table>
+    <thead><tr><th>On <code>taskapi</code></th><th class="score">Unit bench</th><th class="score">Project</th><th>Convergence</th></tr></thead>
+    <tbody>
+      <tr><td>SFT champion (<code>v2</code>)</td><td class="score">31/48</td><td class="score">3/3</td><td>two model-fix rounds</td></tr>
+      <tr class="win"><td>Self-distilled (<code>v4</code>)</td><td class="score">33/48</td><td class="score">3/3</td><td>deterministic-only</td></tr>
+    </tbody>
+  </table>
+  <p>
+    And the honest ceiling, unmoved: <code>workapi</code>, the eight-package spec
+    with concurrency and auth that the champion itself only ever reached green
+    stochastically, stayed <em>not-green</em> for <code>v4</code> too — undone by
+    the same 7B test-writing residuals we have reported for months (a test that
+    invents a method the interface doesn't have; a worker test that reads its
+    counter before the workers drain; a middleware chain wired with the wrong
+    arity). The implementation compiled across most packages; the tests are still
+    the wall. No regression, no breakthrough — the shared ceiling of both models.
+  </p>
+
+  <h2>Why it worked the second time, and where it still leans</h2>
+  <p>
+    The mechanism is not mysterious. Verified pairs are a clean signal precisely
+    because the filter is a compiler, not a preference model — a pair only enters
+    the data if the code built and the race detector was quiet. What broke
+    <code>v3</code> and fixed <code>v4</code> was never the idea; it was
+    <strong>coverage</strong>. Fourteen near-identical pairs teach memorisation;
+    fifty-eight varied ones teach a distribution. But the same measurement exposes
+    the next limit, and we would rather name it than hide it: the harvest still
+    <em>self-selects toward the easy specs</em>. The wheel eagerly produces pairs
+    for the small, fast backends; the large ones — <code>workapi</code> chief among
+    them — go green too, but their long cross-package prompts blow the training
+    budget and get dropped. The diversity we added is real but largely
+    <em>within</em> a spec, not across new domains. So <code>v4</code> is a first
+    net gain, not a solved problem.
+  </p>
+
+  <h2>What we learned</h2>
+  <ul>
+    <li><strong>A model can bootstrap off its own verified output.</strong> No
+      teacher model, no purchased data, no cloud GPU — the Builder's green runs are
+      themselves a training set, and training on them beat the model that generated
+      them on unseen tasks. The compiler is the label.</li>
+    <li><strong>Distillation without diversity is overfitting.</strong>
+      <code>v3</code>'s 14 greedy-temperature pairs regressed five points;
+      <code>v4</code>'s 58 varied ones gained seven back and then some. The lever
+      is coverage — sampling temperature to make the trajectories differ, and a
+      sequence budget long enough to keep them.</li>
+    <li><strong>The gain kept the job.</strong> The self-distilled model is two
+      points stronger on the unseen bench <em>and</em> still 3/3 on the project,
+      converging cleaner than the champion. Capability and cooperativeness moved
+      together, not against each other.</li>
+    <li><strong>The next frontier is cross-spec coverage.</strong> The wheel
+      favours the specs that are cheap to green. Making the hard, large backends
+      pay into the training set — a longer budget, or harder prompt pruning that
+      keeps on-policy fidelity — is the next turn.</li>
+  </ul>
+
+  <div class="report__meta">
+    All training, serving, benchmarking and Builder runs are local on an M1 Max
+    with Apple MLX — total cloud spend: $0. The distillation tap, the harvester and
+    prep, the verified retrieval corpus and the green artifacts:
+    <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
+  </div>
+</article>
+</body>
+</html>
