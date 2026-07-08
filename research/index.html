@@ -34,6 +34,19 @@
     said (wins <em>and</em> losses). All runs are local, $0, and reproducible.
   </p>
 
+  <a class="logentry" href="2026-07-08-the-wheel-overfits.html">
+    <div class="logentry__date">2026-07-08 · Report #10</div>
+    <div class="logentry__title">The wheel overfits at long sequence</div>
+    <div class="logentry__desc">
+      Report #9 named the next frontier: make the hard, large backends pay into the self-distillation
+      set with a longer training budget. We tried it — sequence length 8192 to keep the big cross-package
+      prompts. The budget worked (58 → 74 pairs, workapi included); then the model overfit them and
+      regressed — 27/48 and 23/48 on the unseen bench vs the 33/48 champion — and still failed the spec
+      it trained toward, at the same middleware wall. An honest negative: the champion stands, and the
+      remaining wall is the algorithm's, not the model's.
+    </div>
+  </a>
+
   <a class="logentry" href="2026-07-07-the-wheel-closes.html">
     <div class="logentry__date">2026-07-07 · Report #9</div>
     <div class="logentry__title">The wheel closes: the model learns from its own verified output</div>

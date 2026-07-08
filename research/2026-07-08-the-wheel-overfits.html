@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #10 — The wheel overfits at long sequence · GuildLM Research</title>
+<meta name="description" content="Report #9 named the next frontier: make the hard, large backends pay into the self-distillation set with a longer training budget. We tried it — sequence length 8192 to keep the big cross-package prompts the 4096 budget was dropping. The budget did its job: the harvest went from 58 to 74 pairs, workapi included. Then the model overfit them and regressed — 27/48 and 23/48 on the unseen bench versus the 33/48 champion — and still couldn't crack the spec it was trained toward. An honest negative, and a sharp lesson about the wheel's limits.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #10 · 2026-07-08</div>
+  <h1>The wheel overfits at long sequence</h1>
+  <p class="report__lede">
+    <a href="2026-07-07-the-wheel-closes.html">Report #9</a> ended by naming the
+    next frontier out loud: the self-distillation wheel favours the specs that are
+    cheap to green, and the hard, large backends — <code>workapi</code> chief among
+    them — go green but blow the training budget and get dropped. The proposed fix
+    was <em>a longer budget</em>, so the big cross-package prompts survive pruning
+    and pay into the training set. This report is that experiment. The longer
+    budget did exactly what it promised: it captured the hard pairs. Then the model
+    <strong>overfit them and regressed</strong> — and still couldn't crack the spec
+    it had been trained toward. A clean negative, and a sharper picture of where the
+    wheel breaks.
+  </p>
+
+  <h2>The lever: sequence length 8192</h2>
+  <p>
+    The champion, <code>v4</code>, was distilled from 58 verified pairs at a
+    4096-token sequence length. That budget is exactly why <code>workapi</code>
+    never made it in: its prompts carry the exported API of eight packages, so the
+    real Builder prompt runs 16–23k characters and the prep step drops it. The
+    single-variable change here is to re-prep the same harvested pairs at a
+    <strong>8192-token</strong> budget and retrain on the mix — same base SFT data,
+    same recipe, same ×4 oversample, same 1200 iterations. Only the sequence length
+    moved. Gradient checkpointing kept the peak under 15&nbsp;GB; the whole thing
+    ran local on an M1&nbsp;Max. Cost, as always: <strong>$0</strong>.
+  </p>
+
+  <h2>The budget did its job</h2>
+  <p>
+    This part worked. At 8192 tokens the harvest went from <strong>58 pairs to
+    74</strong>, and the new arrivals were precisely the ones we wanted: the
+    <code>worker</code>-package trajectories — the concurrent background processor
+    that had never fit before — jumped from a handful of lines to nineteen. The
+    wheel finally had the hard, large backend in its training set. If the story were
+    only about coverage, this would be the win. It isn't.
+  </p>
+
+  <h2>And the model overfit it</h2>
+  <p>
+    The validation loss told on it before the benchmark did: it fell to 0.484 at
+    the two-thirds mark, then <strong>spiked to 0.719</strong> as training pressed
+    on — the signature of a model memorising a small, oversampled slice. The unseen
+    unit benchmark confirmed it, and not marginally.
+  </p>
+  <table>
+    <thead><tr><th>Model</th><th>Distilled data</th><th class="score">Unit bench (unseen)</th></tr></thead>
+    <tbody>
+      <tr><td>Base 7B, untuned</td><td>—</td><td class="score">39/48</td></tr>
+      <tr class="win"><td>Self-distilled <code>v4</code> (champion)</td><td>58 pairs · seq&nbsp;4096</td><td class="score">33/48</td></tr>
+      <tr><td>SFT champion (<code>v2</code>)</td><td>none</td><td class="score">31/48</td></tr>
+      <tr><td>Self-distilled <code>v5</code>, final</td><td>74 pairs · seq&nbsp;8192</td><td class="score">27/48</td></tr>
+      <tr><td>Self-distilled <code>v3</code></td><td>14 pairs · seq&nbsp;2048</td><td class="score">26/48</td></tr>
+      <tr><td>Self-distilled <code>v5</code>, early-stop</td><td>74 pairs · seq&nbsp;8192</td><td class="score">23/48</td></tr>
+    </tbody>
+  </table>
+  <p class="report__result">
+    <strong>27/48 — six points under the champion it was built from.</strong> And
+    the earlier, lowest-validation-loss checkpoint was <em>worse</em>, not better:
+    23/48. There is no checkpoint of <code>v5</code> that beats <code>v4</code>;
+    the whole run is a regression. The model didn't just fail to gain — it
+    <em>lost</em> skills the champion had, dropping <code>is_palindrome</code>,
+    <code>sort_by_len</code>, <code>merge_intervals</code>, <code>caesar</code>,
+    <code>top_k_words</code>, and — pointedly — <code>middleware_chain</code>, the
+    very pattern the hard spec needs.
+  </p>
+
+  <h2>Did the overfit at least crack its target?</h2>
+  <p>
+    If a model trades away general competence to specialise, the specialisation had
+    better pay. So we asked the one question that could still redeem <code>v5</code>:
+    it trained on <code>workapi</code>'s own verified trajectories — did it finally
+    finish <code>workapi</code>? We served it and ran the eight-package spec
+    end-to-end. The answer is <strong>no</strong>. After seven fix rounds it stalled
+    <em>not-green</em>, blocked at the same wall as the champion: <code>router.go</code>
+    wires a middleware with the wrong arity — <code>Recover(logger)</code> where the
+    signature wants <code>(next&nbsp;http.Handler, log&nbsp;*slog.Logger)</code> — the
+    identical residual we reported for <code>v4</code>, surviving even though a
+    verified middleware-chain contract sits in the retrieval corpus. Two packages
+    did pass clean, including <code>worker</code>, the concurrency code
+    <code>v5</code> had trained on. But training on the target neither generalised
+    nor closed it. The overfit bought nothing.
+  </p>
+
+  <h2>Why it overfit — and what the wall actually is</h2>
+  <p>
+    The mechanism is the same one Report #9 warned about, now measured at the
+    limit. The harvested pool is small and <em>skewed</em> — heavily
+    <code>taskapi</code> and <code>taskflow</code>, with <code>workapi</code> a
+    thin, freshly-added minority. Oversampling that pool ×4 and stretching every
+    example to 8192 tokens doesn't teach a broader distribution; it drills a
+    narrower one, harder. The longer budget solved <em>coverage</em> and created an
+    <em>overfitting</em> problem in the same move. And the wall it ran into is the
+    tell: the <code>workapi</code> blocker is not missing Go knowledge that more
+    training could add — it is a <strong>deterministic-gate gap</strong>. The model
+    keeps calling a two-argument middleware with one argument; no gate rewrites
+    call-arity, so no amount of weight-baking fixes what is fundamentally a
+    scaffolding job. That is a Builder feature to write, not a model to retrain.
+  </p>
+
+  <h2>What we learned</h2>
+  <ul>
+    <li><strong>The wheel overfits at long sequence.</strong> Sequence length 8192
+      captured the hard cross-package pairs the champion's budget dropped, exactly
+      as intended — and every checkpoint of the resulting model landed below the
+      champion on unseen tasks. Coverage and overfitting moved together.</li>
+    <li><strong>A skewed pool ×4 is the culprit, not the length alone.</strong> With
+      74 pairs dominated by a few easy specs, oversampling memorises. The fix isn't
+      a longer budget on the same data — it's a <em>lower</em> oversample, genuinely
+      cross-spec diversity, and stopping before the validation loss turns up.</li>
+    <li><strong>Training on the target didn't crack the target.</strong> The
+      overfit model still failed <code>workapi</code>, at the same middleware wall
+      as the champion. Specialising off its own trajectories neither generalised nor
+      closed the specific spec — the worst of both.</li>
+    <li><strong>The remaining wall is the algorithm's, not the model's.</strong> The
+      binding constraint is a deterministic-gate gap — middleware call-arity — that
+      retrieval alone doesn't reach. The proven lever, again, is the scaffolding: a
+      gate that rewrites the arity would harden every model, the champion included.</li>
+    <li><strong>The champion stands.</strong> <code>v4</code> — 58 pairs at
+      sequence 4096 — remains the best point the distillation wheel has found. The
+      first turn that gained (Report #9) still stands; this turn marks its ceiling.</li>
+  </ul>
+
+  <div class="report__meta">
+    All training, serving, benchmarking and Builder runs are local on an M1 Max
+    with Apple MLX — total cloud spend: $0. The distillation tap, the harvester and
+    prep, the verified retrieval corpus and the green artifacts:
+    <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
+  </div>
+</article>
+</body>
+</html>
