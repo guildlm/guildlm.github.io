@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #11 — The algorithm composes: peeling an 8-package backend to the ceiling · GuildLM Research</title>
+<meta name="description" content="Report #10 closed the door on making the model bigger. So we pushed the other lever all the way: the algorithm. On the hardest spec in the suite — an eight-package concurrent, authenticated Go backend — six deterministic gates and verified retrieval contracts, model completely unchanged, peeled its walls one by one until it compiled and vet-passed clean across every package, stalling only at the documented 7B integration-test-logic ceiling. The champion's green backends stayed green. And three ways a retrieval corpus can quietly poison itself, each caught and fixed.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #11 · 2026-07-08</div>
+  <h1>The algorithm composes — peeling an eight-package backend to the ceiling</h1>
+  <p class="report__lede">
+    <a href="2026-07-08-the-wheel-overfits.html">Report #10</a> shut a door: making
+    the model <em>bigger</em> — a longer training budget on more of its own verified
+    output — overfit and regressed. The champion stayed the champion. So we did the
+    only honest thing left and pushed the <em>other</em> lever, the one nine reports
+    keep vindicating: the algorithm around the model. We aimed it at the hardest
+    target we have — <code>workapi</code>, an <strong>eight-package</strong>
+    concurrent, bearer-authenticated Go backend — and, with the 7B <strong>completely
+    unchanged</strong>, peeled its failures off one at a time. Each recurring failure
+    became a durable, verified asset. The implementation went green: it compiles and
+    <code>go&nbsp;vet</code>s clean across all eight packages. What remains is a single
+    documented wall we have named for months.
+  </p>
+
+  <h2>Six levers, one model, zero training</h2>
+  <p>
+    The method is the whole thesis in miniature: <strong>never touch the weights;
+    turn every recurring compiler or test failure into a reusable rule.</strong> Two
+    kinds of rule. A <em>deterministic gate</em> — Python that reads the compiler's
+    own error and rewrites the exact defect, the same way every time. A <em>verified
+    retrieval contract</em> — a known-good, compiler-checked Go example the model is
+    shown when it writes a similar file. Over this campaign, six of them, each earning
+    its place by killing a specific, repeatable failure on <code>workapi</code>:
+  </p>
+  <table>
+    <thead><tr><th>Lever</th><th>Kind</th><th>The wall it removes</th></tr></thead>
+    <tbody>
+      <tr><td><code>_fix_middleware_arity</code></td><td>gate</td><td>middleware defined <code>(next, cfg)</code> but used as a <code>Chain</code> value</td></tr>
+      <tr><td>requalify&nbsp;type&nbsp;positions</td><td>gate</td><td>sibling-package types used bare in tests (<code>[]Event</code>, not <code>models.Event</code>)</td></tr>
+      <tr><td>paginated&nbsp;List</td><td>contract</td><td><code>len(svc.List(...))</code> on a two-value <code>(items, error)</code> return</td></tr>
+      <tr><td>auth&nbsp;CRUD&nbsp;router</td><td>contract</td><td>the bearer token dropped on the <code>DELETE</code> request → 401</td></tr>
+      <tr><td>worker&nbsp;drain</td><td>contract</td><td><code>Processed()</code> read before <code>Stop()</code> drains → 0</td></tr>
+      <tr><td>scenario&nbsp;seed</td><td>contract</td><td>a fresh-store subtest not re-creating the task it deletes → 404</td></tr>
+    </tbody>
+  </table>
+
+  <h2>The peel</h2>
+  <p>
+    Run the spec; read the first wall; convert it; run again. <code>workapi</code>
+    began stuck behind a <em>build</em> error — the middleware-arity confusion, a
+    knowledge-free scaffolding defect that retrieval alone had never fixed because
+    the model copies the correct call shape but writes the wrong definition. The gate
+    rewrites the definition in one edit and the eight-package implementation
+    <strong>compiled clean</strong>. Then the walls moved inward, exactly as the
+    thesis predicts: build errors gave way to <code>vet</code> errors gave way to
+    single failing test assertions — a foreign type used bare, a two-valued
+    <code>List</code> misused, a <code>DELETE</code> that forgot its token, a worker
+    counter read too early. Each fell to its lever. The run that carried all of them
+    reached the deepest point any <code>workapi</code> attempt has: <strong><code>go build</code>
+    clean, <code>go vet</code> clean</strong> across all eight packages, with only the
+    router's integration test still red.
+  </p>
+  <p class="report__result">
+    <strong>Build ✓, vet ✓, eight packages, model unchanged.</strong> A concurrent,
+    authenticated, multi-package Go backend — the kind of thing the 7B cannot write
+    in one shot and never could — assembled and made to compile and vet clean by the
+    <em>algorithm around it</em>, not by any change to the model. That is Report #10's
+    negative turned into its positive: the lever that works is the one we can actually
+    move for free.
+  </p>
+
+  <h2>The ceiling we did not pretend to clear</h2>
+  <p>
+    What is left is the wall we have reported since <a href="2026-07-04-the-models-half-was-retrieval.html">Report #8</a>:
+    the 7B's <strong>router integration-test logic</strong>. The model writes a
+    table-driven test with a fresh store per case, then — against its own spec — fails
+    to re-seed the task a <code>DELETE</code> case assumes, so the empty store answers
+    404 where the test wants 204. We wrote the contract that teaches the seed; on the
+    single hardest file it competes with the auth and CRUD contracts for only two
+    shown examples, and the lessons a correct <code>router_test.go</code> needs at
+    once exceed what two examples can carry. That is an honest limit of retrieval at
+    this spec's complexity, not a bug to paper over. We did <em>not</em> hand-write
+    the green; the implementation-clean result is the result.
+  </p>
+
+  <h2>Three ways a corpus poisons itself — and the discipline that caught them</h2>
+  <p>
+    Adding examples to a retrieval corpus is not free, and this campaign paid the
+    tuition three times — each caught by re-checking, not by luck, and each fixed:
+  </p>
+  <ul>
+    <li><strong>Ranking contamination.</strong> A paginated-<code>List</code> example
+      whose service defined only a <code>Task</code> surfaced for the <em>models</em>
+      file and diluted its "define every type" signal — the model then dropped the
+      <code>Event</code> type. Fix: make the contract <em>test-only</em>, so it ranks
+      last for implementation files. Verified against the retriever, not assumed.</li>
+    <li><strong>Name collision.</strong> A test helper named <code>store</code> bled
+      into generated code that imports a package <em>named</em> <code>store</code> —
+      "store already declared." Fix: rename in-example helpers to something no project
+      package will ever be (<code>taskStore</code>).</li>
+    <li><strong>Helper leakage.</strong> A shared <code>do(t,&nbsp;h,&nbsp;method,&nbsp;path,&nbsp;token)</code>
+      test helper got copied and mis-called with the wrong arity. Fix: contracts carry
+      <em>no</em> copyable helper — inline every request, so there is nothing to copy
+      wrong.</li>
+  </ul>
+  <p>
+    The rule that falls out: a retrieval contract must be test-only, use identifiers
+    no project package can collide with, contain no shared helper, and be checked —
+    with the real retriever — to surface for its target and <em>nothing else</em>. And
+    the safety net held: re-running the champion spec <code>taskapi</code> against the
+    grown corpus converged <strong>green with deterministic fixes only</strong>. Six
+    new assets, zero regressions.
+  </p>
+
+  <h2>What we learned</h2>
+  <ul>
+    <li><strong>The algorithm composes.</strong> Gates and contracts stack: each
+      removes one wall and reveals the next, and together they carried an eight-package
+      concurrent+auth backend to build-clean and vet-clean with the model untouched.
+      Capability came from the scaffolding, exactly as the thesis says.</li>
+    <li><strong>Scaffolding beats knowledge on scaffolding defects.</strong> The
+      middleware-arity wall was never a Go-knowledge gap — it was a mechanical mistake
+      retrieval couldn't reach and a gate fixes in one edit. Match the lever to the
+      defect.</li>
+    <li><strong>The remaining wall is genuinely the model's.</strong> Router
+      integration-test logic is semantic synthesis under a long prompt — the 7B's
+      documented ceiling, and the point where free levers run thin.</li>
+    <li><strong>Corpus growth needs an integrity discipline.</strong> Three distinct
+      self-poisonings, all caught by checking rather than trusting. A corpus that
+      silently rots teaches broken Go; the guard is verification, every time.</li>
+  </ul>
+
+  <div class="report__meta">
+    All training, serving, benchmarking and Builder runs are local on an M1 Max with
+    Apple MLX — total cloud spend: $0. The gates, the verified retrieval corpus, the
+    Builder loop and its green artifacts:
+    <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
+  </div>
+</article>
+</body>
+</html>
