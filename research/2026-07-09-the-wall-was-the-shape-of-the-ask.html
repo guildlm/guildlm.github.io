@@ -111,11 +111,14 @@
     We have been burned by stochastic greens before — a single lucky run that never
     reproduces. So we checked. The generated suite passes <code>go test -race</code>
     repeatedly with the cache disabled: no flaky worker-timing, no race. And the
-    Builder reproduces the green from scratch — <strong>three independent
-    generations, 3/3</strong>, each converging green after the same two fix rounds,
-    each writing the same ten focused functions and passing fresh <code>-race</code>.
-    The lever is structural, not a dice roll: a smaller synthesis target per
-    function is easier for the model every time, not once.
+    Builder reproduces the green from scratch — <strong>five independent
+    generations, 5/5</strong>, every one converging green after the same two fix
+    rounds, writing the same ten focused functions and passing fresh
+    <code>-race</code>. That is the contrast that matters: an earlier
+    <code>workapi</code> green under the old mega-test was a one-in-dozens fluke;
+    the split-test ask is green every time. The lever is structural, not a dice
+    roll — a smaller synthesis target per function is easier for the model on every
+    run, not once.
   </p>
 
   <h2>What we learned</h2>
