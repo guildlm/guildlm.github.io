@@ -34,6 +34,20 @@
     said (wins <em>and</em> losses). All runs are local, $0, and reproducible.
   </p>
 
+  <a class="logentry" href="2026-07-09-the-sweep.html">
+    <div class="logentry__date">2026-07-09 · Report #13</div>
+    <div class="logentry__title">The sweep: every backend in the suite goes green</div>
+    <div class="logentry__desc">
+      Report #12 cleared workapi by making one test's ask explicit. This turns that lever loose on the
+      rest of the suite: the six Go backends the system could never autonomously green — logstats,
+      shortener, kvservice, tasks-api, ratelimit, workapi — are now all green, the 7B completely
+      unchanged. Almost every "model ceiling" was an under-specified ask made explicit (a dropped step,
+      an uncomputed test oracle, a positional literal, a mega-test, a missing method, a mis-wired router,
+      a clock injected after construction); the genuinely mechanical ones became two new deterministic
+      gates. The moat is the system, and it builds real Go backends green for $0.
+    </div>
+  </a>
+
   <a class="logentry" href="2026-07-09-the-wall-was-the-shape-of-the-ask.html">
     <div class="logentry__date">2026-07-09 · Report #12</div>
     <div class="logentry__title">The wall was the shape of the ask: workapi goes green</div>

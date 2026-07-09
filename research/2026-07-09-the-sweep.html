@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #13 — The sweep: every backend in the suite goes green · GuildLM Research</title>
+<meta name="description" content="Report #12 cleared workapi by making one test's ask explicit. This report turns that lever loose on the whole suite: the six Go backends that the system could never autonomously green — logstats, shortener, kvservice, tasks-api, ratelimit, and workapi — are now all green, the 7B completely unchanged. Every 'model ceiling' turned out to be either an under-specified ask (a dropped setup step, an uncomputed test oracle, a positional struct literal, a mega-test, a missing method, a mis-wired router, a clock injected after construction) made explicit, or a genuinely mechanical scaffolding bug turned into a deterministic gate. Two new gates shipped. The moat is the system, and the system now builds real Go backends green for $0.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #13 · 2026-07-09</div>
+  <h1>The sweep — every backend in the suite goes green</h1>
+  <p class="report__lede">
+    <a href="2026-07-09-the-wall-was-the-shape-of-the-ask.html">Report #12</a> cleared
+    <code>workapi</code> by making one test's ask explicit and found a slogan: a
+    "model ceiling" can be an artifact of how we asked. This report turns that lever
+    loose on the rest of the suite. The <strong>six</strong> Go backends the system
+    had never autonomously greened — <code>logstats</code>, <code>shortener</code>,
+    <code>kvservice</code>, <code>tasks-api</code>, <code>ratelimit</code>, and
+    <code>workapi</code> — are now <strong>all green</strong>, the 7B
+    <strong>completely unchanged</strong>. Every wall was one of two things: an
+    <em>under-specified ask</em> made explicit, or a <em>genuinely mechanical</em>
+    scaffolding bug turned into a deterministic gate. Two new gates fell out. Nothing
+    was hand-written green; the model wrote every line of every implementation and test.
+  </p>
+
+  <h2>Six backends, one unchanged model</h2>
+  <p>
+    Each spec was run through the Builder against the v4 champion, its first residual
+    read, converted, and re-run — the same peel-the-wall loop as every prior report,
+    now aimed at breadth. What the residuals actually were is the interesting part,
+    because almost none of them were a gap in the model's <em>Go knowledge</em>:
+  </p>
+  <table>
+    <thead><tr><th>Spec</th><th>The wall</th><th>The lever</th></tr></thead>
+    <tbody>
+      <tr><td><code>logstats</code></td><td>miscomputed multi-line aggregation test oracle; broken <code>Totals()</code> assertion; <code>.String()</code> ≠ RFC3339; a bad line Added instead of skipped</td><td>explicit spec: a fully-worked test fixture + control-flow + Format-not-String</td></tr>
+      <tr><td><code>shortener</code></td><td><code>u, err :=</code> with <code>u</code> unused (build); stats checked before the redirect that increments hits</td><td>new gate <code>_fix_unused_var</code> + make the redirect-before-stats step unmissable</td></tr>
+      <tr><td><code>kvservice</code></td><td>positional struct literal mis-slotted a status int into a string field; one shared loop PUT every key so "missing" wasn't missing</td><td>explicit spec: field-named literals + split the missing-key case into its own focused test</td></tr>
+      <tr><td><code>tasks-api</code></td><td>dropped the <code>Update</code> method from interface AND impl; router <em>called</em> handlers with invented args instead of registering them</td><td>explicit spec: implement all methods; pin the handler signature + method-value registration</td></tr>
+      <tr><td><code>ratelimit</code></td><td><code>rec.Header.Get</code> (method not called); void <code>Header.Set</code> inlined as an arg; bucket seeded <code>last</code> from real time under a fake clock; zero-time clock; capacity-2 flow that never denied</td><td>new gate <code>_fix_uncalled_method_value</code> + a request helper + lazy clock seed + non-zero clock + capacity-1</td></tr>
+      <tr><td><code>workapi</code></td><td>(Report #12) one 13-case integration test exceeded single-function synthesis</td><td>split into ten focused per-endpoint tests</td></tr>
+    </tbody>
+  </table>
+  <p class="report__result">
+    <strong>Six backends green. One model, never retrained. $0.</strong> Together with
+    the four that were already green (<code>jsonapi</code>, <code>usersapi</code>,
+    <code>taskflow</code>, <code>taskapi</code>), the entire held-out suite now builds,
+    vets, and passes its race-tested tests — assembled by the algorithm around a fixed
+    7B, not by the 7B alone.
+  </p>
+
+  <h2>What a "model ceiling" was made of</h2>
+  <p>
+    The striking finding, repeated across six independent specs, is a taxonomy. Sort
+    the walls and almost all of them are <em>under-specification</em>, not ignorance:
+  </p>
+  <ul>
+    <li><strong>Dropped a specified step</strong> — the redirect before a hits check,
+      the seed before a delete. The spec said it; the model skipped it under a long
+      prompt. Fix: make the required step unmissable.</li>
+    <li><strong>Couldn't compute the test oracle</strong> — the expected values for a
+      multi-line aggregation. The model can write the <em>implementation</em> to match
+      an oracle it's given, but miscomputes the oracle itself. Fix: give the fixture.</li>
+    <li><strong>Boilerplate it botches differently every time</strong> — positional
+      struct literals, a method value used as a field, a void call inlined as an
+      argument. Fix: name the fields, or hand it one small helper to reuse.</li>
+    <li><strong>State it can't express in one shape</strong> — a shared table loop that
+      can't represent "this case has no setup," a mega-test that overflows working
+      memory. Fix: split into focused functions.</li>
+    <li><strong>A completeness slip</strong> — a method dropped from an interface and
+      its impl. Fix: enumerate and insist.</li>
+  </ul>
+  <p>
+    Only a residue is genuinely the model's, and even that split cleanly: the
+    <code>unused-var</code> and <code>uncalled-method-value</code> mistakes are
+    <em>mechanical</em> — the compiler names them exactly — so they became deterministic
+    gates that fix them the same way forever, on every future spec, no model involved.
+  </p>
+
+  <h2>Two new gates</h2>
+  <p>
+    A gate is Python that reads the compiler's own error and rewrites the exact defect.
+    Two joined the set this sweep, each earned by a wall the fix loop couldn't converge:
+  </p>
+  <ul>
+    <li><strong><code>_fix_unused_var</code></strong> — <code>u, err :=
+      url.ParseRequestURI(raw)</code> where only <code>err</code> is checked →
+      <code>_, err :=</code>. Scoped to blank a captured extra return value only when a
+      real variable remains; a lone unused var is left to the model, since there it
+      usually means a value meant to be used.</li>
+    <li><strong><code>_fix_uncalled_method_value</code></strong> —
+      <code>rec.Header.Get(...)</code> where <code>Header</code> is a method →
+      <code>rec.Header().Get(...)</code>. The compiler's diagnostic disambiguates it
+      from the valid <code>req.Header</code> field, so only the flagged expression is
+      touched.</li>
+  </ul>
+  <p>Both verified on the real artifacts; the Builder's test suite stands at 168 passing.</p>
+
+  <h2>The honest shape of the win</h2>
+  <p>
+    This is spec authoring and gates, not a smarter model — and that is the whole point.
+    A good spec is <em>explicit</em>: it states acceptance criteria, the idioms to use,
+    and the one tricky invariant a case turns on. The clarifications we added are what a
+    senior engineer would write for a junior — call <code>Header()</code>, seed before
+    you delete, this bucket starts full under a fake clock. The model still wrote every
+    implementation and every test; we removed the ambiguity a 7B couldn't resolve on its
+    own, and mechanized the failures that were purely mechanical. "The best Go developer"
+    was never going to be a lone model. It is a <em>system</em> — a fixed small model,
+    an agentic loop, a verified retrieval corpus, a growing set of gates, and specs
+    written like a good engineer writes them — and that system now turns real Go backend
+    specs into green, race-tested code for nothing.
+  </p>
+
+  <div class="report__meta">
+    All training, serving, benchmarking and Builder runs are local on an M1 Max with
+    Apple MLX — total cloud spend: $0. The specs, the gates, the verified retrieval
+    corpus, the Builder loop and its green artifacts:
+    <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
+  </div>
+</article>
+</body>
+</html>
