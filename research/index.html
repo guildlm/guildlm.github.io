@@ -34,6 +34,20 @@
     said (wins <em>and</em> losses). All runs are local, $0, and reproducible.
   </p>
 
+  <a class="logentry" href="2026-07-09-the-wall-was-the-shape-of-the-ask.html">
+    <div class="logentry__date">2026-07-09 · Report #12</div>
+    <div class="logentry__title">The wall was the shape of the ask: workapi goes green</div>
+    <div class="logentry__desc">
+      Report #11 peeled our hardest spec — an eight-package concurrent, bearer-authed backend —
+      to build-clean and vet-clean and stopped at one wall we called the model's own ceiling: the
+      router integration test. It wasn't the model's ceiling. It was the shape of the ask — one long
+      function demanding thirteen cases exceeded the 7B's single-function synthesis budget. Split it
+      into ten small focused per-endpoint tests — better Go practice anyway — and the same unchanged
+      champion writes every one correctly. workapi goes fully green: build, vet, and test-race across
+      all eight packages, model untouched, reproduced from scratch, $0.
+    </div>
+  </a>
+
   <a class="logentry" href="2026-07-08-the-algorithm-composes.html">
     <div class="logentry__date">2026-07-08 · Report #11</div>
     <div class="logentry__title">The algorithm composes: peeling an eight-package backend to the ceiling</div>

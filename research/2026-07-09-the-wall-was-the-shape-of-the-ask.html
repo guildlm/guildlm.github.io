@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #12 — The wall was the shape of the ask: workapi goes green · GuildLM Research</title>
+<meta name="description" content="Report #11 peeled an eight-package Go backend to build-clean and vet-clean and stopped at one wall: the router integration test, which we called the model's own ceiling. It was not. The wall was the shape of the ask — one long function demanding thirteen cases exceeded the 7B's single-function synthesis budget. Split that one test into ten small focused per-endpoint tests — which is better Go practice anyway — and the same unchanged champion writes every one correctly. workapi goes fully green: build, vet, and test-race pass across all eight packages, model untouched, $0.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #12 · 2026-07-09</div>
+  <h1>The wall was the shape of the ask — <code>workapi</code> goes green</h1>
+  <p class="report__lede">
+    <a href="2026-07-08-the-algorithm-composes.html">Report #11</a> peeled
+    <code>workapi</code> — our hardest spec, an <strong>eight-package</strong>
+    concurrent, bearer-authenticated Go backend — down to <strong>build-clean and
+    vet-clean</strong> and stopped at exactly one wall: the router integration
+    test. We called that wall the model's own ceiling, and left it there,
+    honestly. It was not the model's ceiling. The wall was the <em>shape of the
+    ask</em> — a single test function demanding thirteen cases in one long body,
+    more single-function synthesis than a 7B holds together. We changed the shape,
+    not the model. <code>workapi</code> is now <strong>fully green</strong>.
+  </p>
+
+  <h2>What the ceiling actually was</h2>
+  <p>
+    For four reports the last red on <code>workapi</code> lived in one file,
+    <code>internal/api/router_test.go</code>, and it always failed the same way:
+    the model would write a table-driven test with a fresh store per case, then —
+    against its own spec — drop the auth token on a <code>DELETE</code>, or forget
+    to re-seed the task a <code>DELETE</code> case assumes, and the assertions came
+    back 401 or 404 where they wanted 204. Gates cannot reach it (there is no
+    mechanical rewrite of a missing setup step); a retrieval contract that teaches
+    the fix competes with the auth and CRUD contracts for only two shown examples,
+    and one <code>router_test.go</code> needs more lessons at once than two examples
+    carry.
+  </p>
+  <p>
+    Every one of those failures is a <em>bookkeeping</em> failure: track the auth
+    header, the seed, the id, the expected code — across thirteen cases, in one
+    function, under a prompt already thousands of tokens long. That is not a gap in
+    the model's Go knowledge. It is the model running out of working memory inside a
+    single oversized function. The spec was asking for the one thing the 7B is
+    worst at: long, stateful, single-function synthesis.
+  </p>
+
+  <h2>Change the shape, not the weights</h2>
+  <p>
+    So we rewrote the ask. Instead of one <code>TestRouterCRUD</code> covering
+    thirteen cases, the spec now requests <strong>ten small, focused test
+    functions</strong> — one concern each, each building its own fresh router and
+    <em>seeding its own data</em> before it acts:
+  </p>
+  <table>
+    <thead><tr><th>Function</th><th>What it proves</th></tr></thead>
+    <tbody>
+      <tr><td><code>TestCreateOK</code></td><td>POST with token → 201, body echoes the id</td></tr>
+      <tr><td><code>TestCreateUnauthorized</code></td><td>no token / wrong token → 401</td></tr>
+      <tr><td><code>TestCreateInvalid</code></td><td>bad status → 400</td></tr>
+      <tr><td><code>TestCreateDuplicate</code></td><td>same id twice → 409</td></tr>
+      <tr><td><code>TestGetTask</code></td><td>seed, GET → 200; missing → 404</td></tr>
+      <tr><td><code>TestListTasks</code></td><td>seed two, list → 200; <code>?limit=1</code> → ≤1</td></tr>
+      <tr><td><code>TestDeleteTask</code></td><td>seed, DELETE with token → 204, then GET → 404</td></tr>
+      <tr><td><code>TestMalformedJSON</code></td><td>truncated body → 400</td></tr>
+      <tr><td><code>TestHealthz</code> / <code>TestReadyz</code></td><td>health checks → 200</td></tr>
+    </tbody>
+  </table>
+  <p>
+    This is not a trick to flatter the model. It is how a good Go engineer writes
+    these tests: small, isolated, one-assertion-per-concern, each test responsible
+    for its own setup. The "best Go developer" is a <em>system</em>, and part of
+    that system is asking for tests in the shape tests should take. We handed the
+    same unchanged champion a well-shaped ask, and it wrote all ten functions —
+    <strong>exactly the ten named, zero <code>t.Run</code> subtests</strong>,
+    each seeding its own state, the auth header present on every mutating request.
+    The retrieval corpus still showed it the old one-big-function examples; the
+    explicit, well-decomposed spec won.
+  </p>
+
+  <p class="report__result">
+    <strong>workapi: GREEN. build ✓ · vet ✓ · test&nbsp;-race ✓ · eight packages ·
+    model unchanged · $0.</strong> The concurrent, authenticated, multi-package
+    backend that has been our wall since Report #8 now compiles, vets, and passes
+    its full race-tested suite end to end — assembled and made green by the
+    algorithm around a completely untouched 7B.
+  </p>
+
+  <h2>Was it real, or lucky?</h2>
+  <p>
+    We have been burned by stochastic greens before — a single lucky run that never
+    reproduces. So we checked. The generated suite passes <code>go test -race</code>
+    repeatedly with the cache disabled: no flaky worker-timing, no race. And the
+    Builder reproduces the green from scratch — <strong>three independent
+    generations, 3/3</strong>, each converging green after the same two fix rounds,
+    each writing the same ten focused functions and passing fresh <code>-race</code>.
+    The lever is structural, not a dice roll: a smaller synthesis target per
+    function is easier for the model every time, not once.
+  </p>
+
+  <h2>What we learned</h2>
+  <ul>
+    <li><strong>A "model ceiling" can be an artifact of the ask.</strong> The wall
+      we had named the 7B's own limit for four reports was, in large part, the cost
+      of demanding thirteen cases in one function. Decompose the function and the
+      limit moves. Name ceilings carefully — some are the harness's, not the
+      model's.</li>
+    <li><strong>The prompt's structure is a free lever.</strong> No gate, no
+      contract, no weight touched — only the shape of what we asked for. It is the
+      cheapest lever we have found and it cleared the hardest wall in the suite.</li>
+    <li><strong>Good engineering and model-friendliness point the same way.</strong>
+      Small focused tests are better Go <em>and</em> easier for a small model. When
+      the well-shaped ask and the human-preferred one coincide, take it.</li>
+    <li><strong>Explicit decomposition beats a competing example.</strong> Retrieval
+      still offered the old mega-test shape; a spec that names ten functions and
+      their concerns overrode it. Be specific about structure when structure is the
+      thing that's hard.</li>
+  </ul>
+
+  <div class="report__meta">
+    All training, serving, benchmarking and Builder runs are local on an M1 Max with
+    Apple MLX — total cloud spend: $0. The spec, the gates, the verified retrieval
+    corpus, the Builder loop and its green artifacts:
+    <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
+  </div>
+</article>
+</body>
+</html>
