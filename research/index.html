@@ -34,6 +34,20 @@
     said (wins <em>and</em> losses). All runs are local, $0, and reproducible.
   </p>
 
+  <a class="logentry" href="2026-07-10-breadth-new-domains.html">
+    <div class="logentry__date">2026-07-10 · Report #15</div>
+    <div class="logentry__title">Breadth: three new domains join the suite</div>
+    <div class="logentry__desc">
+      After two gates and a set of defaults, breadth: point the system at Go the suite never touched.
+      Three new stdlib-only specs — an LRU cache (container/list), a min-priority queue
+      (container/heap), and a generic Set (type parameters). Two greened first-generation on the
+      unchanged 7B. The LRU surfaced a runtime panic the compiler waved through — a hand-built
+      *list.Element handed to PushFront, double-wrapped — which by Report #14's taxonomy is an idiom
+      for a prompt default, not a gate. With it, green. The run-read-classify loop keeps sorting
+      residuals into gate, default, or spec.
+    </div>
+  </a>
+
   <a class="logentry" href="2026-07-10-a-nudge-is-not-a-gate.html">
     <div class="logentry__date">2026-07-10 · Report #14</div>
     <div class="logentry__title">A nudge is not a gate: promoting the authoring rules</div>

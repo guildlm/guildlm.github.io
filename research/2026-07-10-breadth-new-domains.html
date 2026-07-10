@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #15 — Breadth: three new domains join the suite · GuildLM Research</title>
+<meta name="description" content="After two gates and a set of prompt defaults, the natural next move is breadth: prove the system on Go the suite had never touched. Three new stdlib-only specs, each a different muscle — an LRU cache (container/list), a min-priority queue (container/heap), and a generic Set (type parameters). Two greened first-generation. The LRU surfaced a real, instructive residual — code that builds and vets clean but panics at runtime because the model hand-built a *list.Element and handed it to PushFront, double-wrapping it — which, by the taxonomy of the previous report, is an idiom for a prompt default, not a compiler-named defect for a gate. With that default it greened. The run-read-classify loop keeps sorting residuals into gate, default, or spec.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #15 · 2026-07-10</div>
+  <h1>Breadth — three new domains join the suite</h1>
+  <p class="report__lede">
+    <a href="2026-07-10-a-nudge-is-not-a-gate.html">Report #14</a> built two gates
+    and sharpened the taxonomy — idiom → prompt default, compiler-named defect →
+    gate, spec knowledge → spec. The obvious next move is breadth: point the whole
+    system at Go the suite had never seen. Three new stdlib-only specs, each a
+    different muscle — an <strong>LRU cache</strong> on
+    <code>container/list</code>, a <strong>min-priority queue</strong> on
+    <code>container/heap</code>, and a <strong>generic Set</strong> on type
+    parameters. Two greened on the first generation. The third surfaced a residual
+    worth the whole exercise.
+  </p>
+
+  <h2>Three muscles the suite hadn't used</h2>
+  <table>
+    <thead><tr><th>Spec</th><th>New muscle</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td><code>priorityqueue</code></td><td>a full <code>heap.Interface</code> — <code>Len/Less/Swap</code> plus the pointer-receiver <code>Push</code>/<code>Pop</code> with <code>any</code> assertions</td><td>green, first generation, 33s</td></tr>
+      <tr><td><code>genericset</code></td><td>generics — <code>Set[T comparable]</code>, a top-level <code>New[T]()</code> (methods can't add type params), non-mutating <code>Union</code>/<code>Intersect</code></td><td>green, first generation, 30s</td></tr>
+      <tr><td><code>lrucache</code></td><td><code>container/list</code> recency ordering + a map + a mutex</td><td>green after one new default (below)</td></tr>
+    </tbody>
+  </table>
+  <p>
+    The two that greened cold are the point of the whole "system, not a model"
+    thesis: an unchanged 7B, handed a clear spec and the accumulated defaults, wrote
+    a correct heap implementation and a correct generic container on the first try —
+    domains nowhere in its fine-tuning corpus.
+  </p>
+
+  <h2>The LRU residual — a runtime panic the compiler waved through</h2>
+  <p>
+    The cache built clean and vetted clean, then <em>panicked</em> under test:
+  </p>
+  <pre>panic: interface conversion: interface {} is *list.Element, not *lru.entry</pre>
+  <p>
+    The cause is a genuine <code>container/list</code> trap:
+  </p>
+  <pre>newElement := &list.Element{Value: &entry{key, value}}   <span class="report__code-note">// hand-built an Element…</span>
+c.items[key] = c.ll.PushFront(newElement)               <span class="report__code-note">// …and PushFront wraps it AGAIN</span></pre>
+  <p>
+    <code>PushFront</code> takes the <em>value</em> to store and creates the
+    <code>*list.Element</code> for you. Hand it a <code>*list.Element</code> and it
+    double-wraps — the stored element's <code>Value</code> becomes another
+    <code>*list.Element</code>, so a later <code>el.Value.(*entry)</code> blows up.
+    Crucially, the compiler <em>accepts</em> this: <code>PushFront</code> takes
+    <code>any</code>, so the type error only exists at runtime.
+  </p>
+
+  <h2>Which bucket? An idiom, so a default</h2>
+  <p>
+    Report #14's taxonomy answered it immediately. This is not a compiler-named
+    defect, so it isn't a gate — and it can't safely be one anyway: the wrong Element
+    hides behind a local variable, so there is no crisp <code>PushFront(&list.Element{…})</code>
+    token to rewrite. It is an <em>idiom the model doesn't know</em>, which is what a
+    prompt default is for. So <code>container/list</code> usage now carries one:
+    <em>PushFront/PushBack take the value and return the element; never hand-build a
+    <code>&amp;list.Element{Value: v}</code>; read a value back with
+    <code>el.Value.(*entry)</code>.</em> It fires only on files whose purpose uses the
+    list — targeted, not a tax on every prompt. With it in place the re-run greened in
+    70 seconds: <code>el := ll.PushFront(&amp;entry{...})</code>, and a second run
+    reproduced it — 2/2 green with the default, where the un-nudged generation had
+    panicked.
+  </p>
+  <p class="report__result">
+    Three new domains, all green; one new conditional default; the Builder's test
+    suite at <strong>193</strong>, corpus 36/36, the 7B untouched. The loop that
+    built the gates is the same loop that grows the breadth: run it, read the
+    residual, and sort it into the bucket it belongs in — gate, default, or spec.
+    The best Go developer is a system, and the system keeps learning new rooms of
+    the language for $0.
+  </p>
+
+  <div class="report__meta">
+    All training, serving, benchmarking and Builder runs are local on an M1 Max
+    with Apple MLX — total cloud spend: $0. The specs, the defaults, the gates, the
+    verified retrieval corpus and the Builder loop:
+    <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
+  </div>
+</article>
+</body>
+</html>
