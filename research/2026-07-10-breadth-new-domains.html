@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Report #15 — Breadth: three new domains join the suite · GuildLM Research</title>
-<meta name="description" content="After two gates and a set of prompt defaults, the natural next move is breadth: prove the system on Go the suite had never touched. Five new stdlib-only specs, each a different muscle — an LRU cache (container/list), a min-priority queue (container/heap), a generic Set (type parameters), a recursive-descent expression evaluator, and a channel-based pub-sub event bus. A regression sweep confirms the session's gates and defaults break none of the existing suite. Two greened first-generation. The LRU surfaced a real, instructive residual — code that builds and vets clean but panics at runtime because the model hand-built a *list.Element and handed it to PushFront, double-wrapping it — which, by the taxonomy of the previous report, is an idiom for a prompt default, not a compiler-named defect for a gate. With that default it greened. The run-read-classify loop keeps sorting residuals into gate, default, or spec.">
+<meta name="description" content="After two gates and a set of prompt defaults, the natural next move is breadth: prove the system on Go the suite had never touched. Seven new stdlib-only specs, each a different muscle — LRU cache (container/list), min-priority queue (container/heap), generic Set (type parameters), recursive-descent expression evaluator, channel-based pub-sub event bus, word-packed bitset, and a custom JSON codec. Six greened first-generation on the unchanged 7B. A regression sweep confirms the session's gates and defaults break none of the existing suite. Two greened first-generation. The LRU surfaced a real, instructive residual — code that builds and vets clean but panics at runtime because the model hand-built a *list.Element and handed it to PushFront, double-wrapping it — which, by the taxonomy of the previous report, is an idiom for a prompt default, not a compiler-named defect for a gate. With that default it greened. The run-read-classify loop keeps sorting residuals into gate, default, or spec.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../styles.css">
@@ -35,15 +35,16 @@
     <a href="2026-07-10-a-nudge-is-not-a-gate.html">Report #14</a> built two gates
     and sharpened the taxonomy — idiom → prompt default, compiler-named defect →
     gate, spec knowledge → spec. The obvious next move is breadth: point the whole
-    system at Go the suite had never seen. Five new stdlib-only specs, each a
+    system at Go the suite had never seen. Seven new stdlib-only specs, each a
     different muscle — an <strong>LRU cache</strong> on
     <code>container/list</code>, a <strong>min-priority queue</strong> on
     <code>container/heap</code>, a <strong>generic Set</strong> on type
-    parameters, a recursive-descent <strong>expression evaluator</strong>
-    (precedence, parentheses, real error handling), and a <strong>pub-sub event
-    bus</strong> on channels (the one concurrency the suite had only ever tested
-    through mutexes). Four greened on the first generation. The fifth — the LRU —
-    surfaced a residual worth the whole exercise.
+    parameters, a recursive-descent <strong>expression evaluator</strong>, a
+    <strong>pub-sub event bus</strong> on channels (the one concurrency the suite
+    had only ever tested through mutexes), a <strong>bitset</strong> on
+    word-packed bit manipulation, and a <strong>custom JSON codec</strong> (the
+    infinite-recursion trap). Six greened on the first generation. The seventh — the
+    LRU — surfaced a residual worth the whole exercise.
   </p>
 
   <h2>Three muscles the suite hadn't used</h2>
@@ -54,15 +55,20 @@
       <tr><td><code>genericset</code></td><td>generics — <code>Set[T comparable]</code>, a top-level <code>New[T]()</code> (methods can't add type params), non-mutating <code>Union</code>/<code>Intersect</code></td><td>green, first generation, 30s</td></tr>
       <tr><td><code>expreval</code></td><td>a recursive-descent parser — tokenizing, operator precedence, left associativity, and error paths (div-by-zero, missing operand, unbalanced parens, trailing junk)</td><td>green, first generation, 40s</td></tr>
       <tr><td><code>eventbus</code></td><td>channel concurrency — per-topic buffered subscriber channels with a non-blocking send under lock (<code>select … default</code>) so a slow subscriber can't deadlock the publisher</td><td>green, first generation, race-clean</td></tr>
+      <tr><td><code>bitset</code></td><td>word-packed bit manipulation — <code>i/64</code> word index, <code>1&lt;&lt;(i%64)</code> mask, popcount via <code>math/bits</code>, slice growth</td><td>green, first generation</td></tr>
+      <tr><td><code>jsoncodec</code></td><td>custom JSON marshaling — the recursion trap (marshal a wire struct, not the type itself), value-receiver Marshal + pointer-receiver Unmarshal</td><td>green, first generation</td></tr>
       <tr><td><code>lrucache</code></td><td><code>container/list</code> recency ordering + a map + a mutex</td><td>green after one new default (below)</td></tr>
     </tbody>
   </table>
   <p>
-    The four that greened cold are the point of the whole "system, not a model"
+    The six that greened cold are the point of the whole "system, not a model"
     thesis: an unchanged 7B, handed a clear spec and the accumulated defaults, wrote
-    a correct heap implementation, a correct generic container, a correct
-    precedence-respecting parser, and a deadlock-free channel bus on the first try —
-    domains nowhere in its fine-tuning corpus.
+    a correct heap, a correct generic container, a precedence-respecting parser, a
+    deadlock-free channel bus, correct word-packed bit math, and a recursion-safe
+    JSON codec on the first try — domains nowhere in its fine-tuning corpus. The last
+    two were chosen precisely because they are small-model traps (bit off-by-ones;
+    the <code>MarshalJSON</code> that calls itself forever); the explicit spec plus the
+    accumulated defaults walked the model straight past both.
   </p>
 
   <h2>The LRU residual — a runtime panic the compiler waved through</h2>
@@ -100,7 +106,7 @@ c.items[key] = c.ll.PushFront(newElement)               <span class="report__cod
     panicked.
   </p>
   <p class="report__result">
-    Five new domains, all green; one new conditional default; the Builder's test
+    Seven new domains, all green; one new conditional default; the Builder's test
     suite at <strong>193</strong>, corpus 36/36, the 7B untouched. And the new
     machinery is safe on the old work: a regression sweep re-ran
     <code>taskapi</code>, <code>usersapi</code>, <code>jsonapi</code> and

@@ -39,13 +39,14 @@
     <div class="logentry__title">Breadth: three new domains join the suite</div>
     <div class="logentry__desc">
       After two gates and a set of defaults, breadth: point the system at Go the suite never touched.
-      Five new stdlib-only specs — an LRU cache (container/list), a min-priority queue
-      (container/heap), a generic Set (type parameters), a recursive-descent expression evaluator, and
-      a channel-based pub-sub event bus. Four greened first-generation on the unchanged 7B. The LRU
-      surfaced a runtime panic the compiler waved through — a hand-built *list.Element handed to
-      PushFront, double-wrapped — which by Report #14's taxonomy is an idiom for a prompt default, not
-      a gate. With it, green. A regression sweep confirms the session's gates and defaults break none
-      of the existing suite.
+      Seven new stdlib-only specs — LRU cache (container/list), min-priority queue (container/heap),
+      generic Set (type parameters), recursive-descent expression evaluator, channel-based pub-sub
+      event bus, word-packed bitset, and a custom JSON codec. Six greened first-generation on the
+      unchanged 7B, including two picked as small-model traps (bit off-by-ones; the MarshalJSON that
+      calls itself forever). The LRU surfaced a runtime panic the compiler waved through — a hand-built
+      *list.Element double-wrapped by PushFront — which by Report #14's taxonomy is an idiom for a
+      prompt default, not a gate. A regression sweep confirms the session's gates and defaults break
+      none of the existing suite.
     </div>
   </a>
 
