@@ -203,11 +203,13 @@ var _ Store = (*MemStore)(nil)</pre>
     <code>Store</code> interface missing <em>four</em> methods its own in-memory
     implementation defined, and the gate lifted all four — <code>Create</code>,
     <code>Get</code>, <code>List</code>, <code>Delete</code> — back onto the
-    interface, verbatim. That run as a whole did not converge — it foundered on two
+    interface, verbatim. That particular run did not converge — it foundered on two
     residuals the gate has no business touching (a <code>*Store</code>
     pointer-to-interface receiver and a missing struct field, the sort of chaos
-    <code>taskflow</code>'s twelve files still throw) — which is the honest shape of
-    it: a correct gate closes its class and no more.
+    <code>taskflow</code>'s twelve files still throw; a later generation of the same
+    spec greened in six minutes on a single deterministic fix, which is just to say
+    the spec is stochastic) — the honest shape of it being that a correct gate
+    closes its class and no more.
   </p>
   <p>
     Though "and no more" lasted about an hour. One of those two residuals — the
