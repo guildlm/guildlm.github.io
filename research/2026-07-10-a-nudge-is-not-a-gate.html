@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #14 — A nudge is not a gate: promoting the authoring rules · GuildLM Research</title>
+<meta name="description" content="Report #13 closed the suite by hardening each spec by hand. But a lesson written into one spec's YAML only helps that spec. This report promotes three recurring authoring rules — field-named struct literals, interface/impl parity, register-the-method-value — into the Builder's permanent, conditional prompt defaults: unit-tested, regression-safe, aimed at every relevant file. Then it tries to prove they are load-bearing by DELETING the hardening from a spec — and the probe fails, for an honest and clarifying reason. It separates what generalizes as a prompt nudge from what does not: the model dropping a required method from both an interface and its implementation is a completeness failure a nudge cannot catch and a gate can. A negative result that sharpens the thesis.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #14 · 2026-07-10</div>
+  <h1>A nudge is not a gate — promoting the authoring rules</h1>
+  <p class="report__lede">
+    <a href="2026-07-09-the-sweep.html">Report #13</a> closed the whole suite by
+    hardening each spec by hand — a good engineer's clarifications, written into
+    YAML. But a lesson written into <em>one</em> spec's YAML only helps that spec;
+    the next one starts naive and re-earns the same wall. So this report tries to
+    pay down that debt: move the recurring authoring rules <em>out</em> of
+    individual specs and <em>into</em> the Builder's permanent defaults, then prove
+    they carry their weight by <strong>deleting</strong> the hardening from a spec
+    and watching it stay green. Three rules moved cleanly. The deletion probe
+    <strong>failed</strong> — and the failure is the most useful thing in the
+    report, because it draws a sharp line between what a prompt nudge can carry and
+    what only a deterministic gate can.
+  </p>
+
+  <h2>The spec-authoring debt</h2>
+  <p>
+    Across the sweep, the same handful of clarifications kept reappearing, spec
+    after spec. Two of them were already promoted to defaults in earlier reports
+    (never shadow <code>t</code>; isolate per-case state). Three were still being
+    copy-pasted by hand:
+  </p>
+  <table>
+    <thead><tr><th>Rule (copy-pasted per spec)</th><th>Specs that repeated it</th><th>The failure it prevents</th></tr></thead>
+    <tbody>
+      <tr><td>write struct literals with <strong>field names</strong>, never positional</td><td><code>kvservice</code>, <code>taskapipro</code></td><td>a value silently lands in the wrong field — and <code>go vet</code> only flags this for an <em>imported</em> struct, never a same-package test table</td></tr>
+      <tr><td><strong>interface/impl parity</strong> — same method set on both sides</td><td><code>taskflow</code>, <code>taskapipro</code></td><td>the impl has a method the interface never declared (or vice-versa), so a call through the interface is undefined</td></tr>
+      <tr><td><strong>register the method value</strong>, never call the handler</td><td><code>tasks-api</code>, <code>ratelimit</code></td><td><code>mux.HandleFunc(pat, h.Create(w, r))</code> or an invented extra arg instead of <code>h.Create</code></td></tr>
+    </tbody>
+  </table>
+  <p>
+    Copy-paste is debt: it means the <em>system</em> hadn't learned the lesson — I
+    had. So each moved into <code>_generate_prompt</code> as a <strong>conditional</strong>
+    default, firing only on the file kind it applies to (the 7B degrades on long
+    prompts, so a rule that fires everywhere is a tax): field-named literals on
+    <code>_test.go</code> files, interface/impl parity on implementation files,
+    method-value registration on routing files. Three new unit tests assert each
+    rule appears in the right prompt and stays out of the wrong one. The Builder's
+    test suite went 168 → <strong>171</strong> passing; the verified retrieval
+    corpus still builds <strong>36/36</strong>. Nothing in the model changed; this
+    is all prompt scaffolding.
+  </p>
+
+  <h2>The probe: delete the hardening</h2>
+  <p>
+    A default is only worth its prompt length if it lets a spec drop the
+    hand-hardening. So the test is subtractive. <code>tasks-api</code>'s two
+    original walls (Report&nbsp;#13) were exactly (1) the model dropped the
+    <code>Update</code> method, and (2) the router called handlers instead of
+    registering them — both now defaults. I wrote <code>tasks-api-min.yaml</code>:
+    the same spec with the all-methods paragraph and the method-value paragraph
+    <em>stripped out</em>, leaning entirely on the promoted defaults.
+  </p>
+  <p>
+    It did not go green — twice. The first attempt also tripped an orthogonal
+    <code>string</code>-vs-<code>int</code> id bug I had over-stripped (the fact
+    that <em>this</em> spec's IDs are integers isn't one of the promoted idioms,
+    so restoring it was fair); with that one spec-specific line put back, the
+    second attempt <strong>still</strong> exhausted all six fix rounds on the same
+    wall. The residual was blunt:
+  </p>
+  <pre>handlers.go: a.store.Update undefined (type Store has no field or method Update)</pre>
+  <p>
+    And here is the clarifying part. The generated <code>store.go</code> looked
+    internally consistent:
+  </p>
+  <pre>type Store interface {
+    Create(t Task) error
+    Get(id int) (Task, error)
+    List() []Task
+    Delete(id int) error          <span class="report__code-note">// no Update — dropped from the interface…</span>
+}
+// …and no Update on the impl either, so this compiles:
+var _ Store = (*MemStore)(nil)</pre>
+  <p>
+    The model dropped <code>Update</code> from the interface <em>and</em> the
+    implementation <em>together</em>. The parity assertion passes — both sides
+    agree — yet the method the handlers call doesn't exist anywhere. This is not a
+    <em>parity</em> failure, which my new default is built to prevent. It is a
+    <em>completeness</em> failure: a required method missing from both sides.
+  </p>
+
+  <h2>Why completeness can't be a blanket default</h2>
+  <p>
+    There is a structural reason a prompt nudge can't fix this. The Builder writes
+    files in order — <code>store.go</code> (3/8) is generated <em>before</em>
+    <code>handlers.go</code> (4/8). When the model writes the Store interface, the
+    caller that will need <code>Update</code> <strong>does not exist yet</strong>.
+    A generic default cannot say "include the methods your callers will need,"
+    because at generation time there are no callers to point at. The only thing
+    that knows <code>Update</code> is required is the <em>spec</em> — which is
+    exactly why the original hardening (<em>"handlers call <code>store.Update</code>,
+    so a missing <code>Update</code> breaks the build"</em>) was load-bearing, and
+    why it doesn't generalize.
+  </p>
+  <p>
+    The fix loop tried: five rounds, each correctly widening to "type Store
+    (missing method Update)" and asking the model to repair it. It never
+    converged — the model kept regenerating a Store still missing the method, or
+    fixed one file and broke another. A probabilistic repair of a synthesis gap is
+    still probabilistic.
+  </p>
+
+  <h2>The honest line: nudge vs. gate</h2>
+  <p>
+    This report is a negative result on its headline claim — you cannot delete
+    <code>tasks-api</code>'s hardening — and it is worth more than a green
+    checkmark, because it partitions the work cleanly:
+  </p>
+  <ul>
+    <li><strong>What a prompt nudge carries</strong> — recurring <em>idioms</em>
+      the model already half-knows: field-named literals, method-value
+      registration, keeping an interface and its impl in sync when both are
+      visible — reworded, after this probe, to forbid the tempting inverse of
+      dropping a method from <em>both</em> sides just to make them "match." These
+      lower the baseline mistake rate on every future spec, for free, and cost
+      only a couple of sentences on the relevant file. They stay.</li>
+    <li><strong>What a nudge cannot carry</strong> — <em>which</em> methods must
+      exist. That is spec knowledge, not an idiom, and it isn't visible at the
+      moment the file is written. A default that tried to assert it would be
+      guessing.</li>
+    <li><strong>What only a gate can carry</strong> — the mechanical, compiler-named
+      version: when <code>a.store.Update</code> is undefined and a sibling declares
+      the <code>Store</code> interface, add the method to the interface and stub a
+      real impl. That is a deterministic rewrite the fix loop can apply the same
+      way every time — and it is a genuine, if delicate, piece of AST surgery.
+      It is the clear next lever for this class, and it is the kind of change I
+      won't make unprompted.</li>
+  </ul>
+  <p class="report__result">
+    Three authoring rules are now permanent, conditional, regression-safe Builder
+    defaults — <code>kvservice</code> still greens first-generation and the
+    five-package <code>taskapipro</code> still converges green and race-clean, so
+    the additions cost nothing — and the deletion probe drew the boundary the
+    defaults can't cross. The moat is still the system — a fixed 7B, an agentic loop, a
+    verified corpus, a growing set of gates, and specs written like an engineer
+    writes them. This report tightened one screw and, more usefully, marked
+    exactly where the next one goes.
+  </p>
+
+  <div class="report__meta">
+    All training, serving, benchmarking and Builder runs are local on an M1 Max
+    with Apple MLX — total cloud spend: $0. The specs, the promoted defaults, the
+    gates, the verified retrieval corpus and the Builder loop:
+    <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
+  </div>
+</article>
+</body>
+</html>

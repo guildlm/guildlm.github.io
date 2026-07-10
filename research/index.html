@@ -34,6 +34,21 @@
     said (wins <em>and</em> losses). All runs are local, $0, and reproducible.
   </p>
 
+  <a class="logentry" href="2026-07-10-a-nudge-is-not-a-gate.html">
+    <div class="logentry__date">2026-07-10 · Report #14</div>
+    <div class="logentry__title">A nudge is not a gate: promoting the authoring rules</div>
+    <div class="logentry__desc">
+      Report #13 closed the suite by hardening each spec by hand — but a lesson in one spec's YAML
+      only helps that spec. This promotes three recurring authoring rules (field-named struct literals,
+      interface/impl parity, register-the-method-value) into the Builder's permanent, conditional prompt
+      defaults: unit-tested, regression-safe, 171 tests green. Then it tries to prove they're load-bearing
+      by deleting the hardening from a spec — and the probe fails, usefully. It separates what a prompt
+      nudge can carry (idioms) from what it can't (which methods must exist — a completeness failure the
+      model commits by dropping a method from both an interface and its impl, which only a deterministic
+      gate can catch). A negative result that marks exactly where the next lever goes.
+    </div>
+  </a>
+
   <a class="logentry" href="2026-07-09-the-sweep.html">
     <div class="logentry__date">2026-07-09 · Report #13</div>
     <div class="logentry__title">The sweep: every backend in the suite goes green</div>
