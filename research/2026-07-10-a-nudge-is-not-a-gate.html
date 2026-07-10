@@ -170,6 +170,47 @@ var _ Store = (*MemStore)(nil)</pre>
     exactly where the next one goes.
   </p>
 
+  <h2>Postscript — the gate, built and bounded</h2>
+  <p>
+    The pointer got picked up: build the gate. It exists now as
+    <code>_fix_interface_missing_method</code>, and building it sharpened the class
+    one more notch. The gate handles the <em>safe</em> half — the taskflow escape,
+    where the model writes a method on the concrete implementation but forgets to
+    <em>declare</em> it on the interface, so a call through the interface is
+    undefined. When a same-package type already implements every method the
+    interface currently lists <strong>and</strong> has the missing one, the gate
+    lifts that method's exact signature — copied verbatim from real code, never
+    inferred — into the interface. It is safe by construction: the implementer
+    provably satisfies the augmented interface, and it bails on every ambiguity
+    (the type isn't an interface, the method is already declared, no same-package
+    type implements interface-plus-method, or candidate implementers disagree on
+    the signature).
+  </p>
+  <p>
+    What it pointedly does <em>not</em> do is the case that motivated the whole
+    report — <code>tasks-api-min</code>, where the method is gone from
+    <em>both</em> sides. There is no signature to lift, and synthesizing a method
+    body deterministically would be guessing, so the gate no-ops and leaves that to
+    the model. The boundary from the body of the report holds, one notch finer: the
+    <em>mismatch</em> half of completeness (the impl has it, the interface doesn't)
+    is mechanical and now deterministic; the <em>pure</em> half (which methods must
+    exist at all) is spec knowledge and stays with the model. It is verified the
+    way a deterministic gate should be — not by hoping a stochastic run trips it,
+    but by exercising the exact path: fourteen unit tests over the fire path, the
+    multi-method case, and every guard, plus a real module where <code>go build</code>
+    and <code>go vet</code> fail before the gate and pass after, gofmt-clean. And
+    it did fire in the wild: a live <code>taskflow</code> run shipped a
+    <code>Store</code> interface missing <em>four</em> methods its own in-memory
+    implementation defined, and the gate lifted all four — <code>Create</code>,
+    <code>Get</code>, <code>List</code>, <code>Delete</code> — back onto the
+    interface, verbatim. That run as a whole did not converge — it foundered on two
+    residuals the gate has no business touching (a <code>*Store</code>
+    pointer-to-interface receiver and a missing struct field, the sort of chaos
+    <code>taskflow</code>'s twelve files still throw) — which is the honest shape of
+    it: a correct gate closes its class and no more. The Builder's test suite stands
+    at <strong>185</strong>.
+  </p>
+
   <div class="report__meta">
     All training, serving, benchmarking and Builder runs are local on an M1 Max
     with Apple MLX — total cloud spend: $0. The specs, the promoted defaults, the
