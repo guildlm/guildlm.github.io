@@ -207,8 +207,23 @@ var _ Store = (*MemStore)(nil)</pre>
     residuals the gate has no business touching (a <code>*Store</code>
     pointer-to-interface receiver and a missing struct field, the sort of chaos
     <code>taskflow</code>'s twelve files still throw) — which is the honest shape of
-    it: a correct gate closes its class and no more. The Builder's test suite stands
-    at <strong>185</strong>.
+    it: a correct gate closes its class and no more.
+  </p>
+  <p>
+    Though "and no more" lasted about an hour. One of those two residuals — the
+    <code>*Store</code> pointer-to-interface receiver — is itself a mechanical,
+    compiler-named class: a pointer to an interface has no methods and is
+    essentially always a bug, so <code>*Interface&nbsp;→&nbsp;Interface</code>
+    became a second deterministic gate the same session
+    (<code>_fix_pointer_to_interface</code>). Verified the same way — seven unit
+    tests including the load-bearing guard that a pointer to a <em>struct</em> is
+    valid and left alone, plus the real <code>taskflow</code> artifact, where it
+    clears all three pointer errors and leaves exactly the one genuine model bug (a
+    reference to a struct field that was never declared) for the model. That is the
+    shape of the whole project in miniature: run it, read the residual, and if the
+    compiler names the defect the same way every time, it becomes a gate; if it
+    doesn't, it stays with the model or the spec. The Builder's test suite stands at
+    <strong>192</strong>.
   </p>
 
   <div class="report__meta">
