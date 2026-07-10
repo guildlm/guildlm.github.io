@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Report #15 — Breadth: three new domains join the suite · GuildLM Research</title>
-<meta name="description" content="After two gates and a set of prompt defaults, the natural next move is breadth: prove the system on Go the suite had never touched. Three new stdlib-only specs, each a different muscle — an LRU cache (container/list), a min-priority queue (container/heap), and a generic Set (type parameters). Two greened first-generation. The LRU surfaced a real, instructive residual — code that builds and vets clean but panics at runtime because the model hand-built a *list.Element and handed it to PushFront, double-wrapping it — which, by the taxonomy of the previous report, is an idiom for a prompt default, not a compiler-named defect for a gate. With that default it greened. The run-read-classify loop keeps sorting residuals into gate, default, or spec.">
+<meta name="description" content="After two gates and a set of prompt defaults, the natural next move is breadth: prove the system on Go the suite had never touched. Four new stdlib-only specs, each a different muscle — an LRU cache (container/list), a min-priority queue (container/heap), a generic Set (type parameters), and a recursive-descent expression evaluator. Two greened first-generation. The LRU surfaced a real, instructive residual — code that builds and vets clean but panics at runtime because the model hand-built a *list.Element and handed it to PushFront, double-wrapping it — which, by the taxonomy of the previous report, is an idiom for a prompt default, not a compiler-named defect for a gate. With that default it greened. The run-read-classify loop keeps sorting residuals into gate, default, or spec.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../styles.css">
@@ -35,12 +35,14 @@
     <a href="2026-07-10-a-nudge-is-not-a-gate.html">Report #14</a> built two gates
     and sharpened the taxonomy — idiom → prompt default, compiler-named defect →
     gate, spec knowledge → spec. The obvious next move is breadth: point the whole
-    system at Go the suite had never seen. Three new stdlib-only specs, each a
+    system at Go the suite had never seen. Four new stdlib-only specs, each a
     different muscle — an <strong>LRU cache</strong> on
     <code>container/list</code>, a <strong>min-priority queue</strong> on
-    <code>container/heap</code>, and a <strong>generic Set</strong> on type
-    parameters. Two greened on the first generation. The third surfaced a residual
-    worth the whole exercise.
+    <code>container/heap</code>, a <strong>generic Set</strong> on type
+    parameters, and a recursive-descent <strong>expression evaluator</strong>
+    (precedence, parentheses, real error handling). Three greened on the first
+    generation. The fourth — the LRU — surfaced a residual worth the whole
+    exercise.
   </p>
 
   <h2>Three muscles the suite hadn't used</h2>
@@ -49,14 +51,16 @@
     <tbody>
       <tr><td><code>priorityqueue</code></td><td>a full <code>heap.Interface</code> — <code>Len/Less/Swap</code> plus the pointer-receiver <code>Push</code>/<code>Pop</code> with <code>any</code> assertions</td><td>green, first generation, 33s</td></tr>
       <tr><td><code>genericset</code></td><td>generics — <code>Set[T comparable]</code>, a top-level <code>New[T]()</code> (methods can't add type params), non-mutating <code>Union</code>/<code>Intersect</code></td><td>green, first generation, 30s</td></tr>
+      <tr><td><code>expreval</code></td><td>a recursive-descent parser — tokenizing, operator precedence, left associativity, and error paths (div-by-zero, missing operand, unbalanced parens, trailing junk)</td><td>green, first generation, 40s</td></tr>
       <tr><td><code>lrucache</code></td><td><code>container/list</code> recency ordering + a map + a mutex</td><td>green after one new default (below)</td></tr>
     </tbody>
   </table>
   <p>
-    The two that greened cold are the point of the whole "system, not a model"
+    The three that greened cold are the point of the whole "system, not a model"
     thesis: an unchanged 7B, handed a clear spec and the accumulated defaults, wrote
-    a correct heap implementation and a correct generic container on the first try —
-    domains nowhere in its fine-tuning corpus.
+    a correct heap implementation, a correct generic container, and a correct
+    precedence-respecting parser on the first try — domains nowhere in its
+    fine-tuning corpus.
   </p>
 
   <h2>The LRU residual — a runtime panic the compiler waved through</h2>
@@ -94,7 +98,7 @@ c.items[key] = c.ll.PushFront(newElement)               <span class="report__cod
     panicked.
   </p>
   <p class="report__result">
-    Three new domains, all green; one new conditional default; the Builder's test
+    Four new domains, all green; one new conditional default; the Builder's test
     suite at <strong>193</strong>, corpus 36/36, the 7B untouched. The loop that
     built the gates is the same loop that grows the breadth: run it, read the
     residual, and sort it into the bucket it belongs in — gate, default, or spec.
