@@ -147,6 +147,65 @@
     test suite stands at <strong>253</strong>, on an unchanged model, at $0.
   </p>
 
+  <h2>Postscript — three more mechanisms that only looked like they worked</h2>
+  <p>
+    Once you start counting instead of assuming, it is hard to stop. Three more,
+    each found the same way.
+  </p>
+  <p>
+    <strong>Best-of-N had never selected anything.</strong> The Builder samples two
+    candidates per file and keeps the clean one. Grepping the logs:
+    <strong>230</strong> instances of <em>"no clean candidate; using last of 2"</em>,
+    and <strong>zero</strong> of <em>"kept candidate"</em>. Not a bias — a total
+    absence. The check that decides whether a candidate is clean rejects any file
+    importing something non-stdlib, which is how a small model gets stopped from
+    reaching for <code>gorilla/mux</code>. But a project's OWN packages carry a
+    domain too — <code>guildlm.dev/workapi/internal/store</code> — so in every
+    multi-package project, <em>every file</em> looked like a foreign dependency. No
+    candidate was ever clean, and best-of-N quietly degenerated into "keep the last
+    sample", which is not a selection, it is a coin flip. It had been drawing a
+    second sample and throwing it away for months. Measured against artifacts that
+    are green — they build, vet and pass <code>-race</code>, so they are as clean as
+    Go gets — <code>workapi</code> went from 7/18 files judged clean to 17/18, and
+    <code>taskapi</code> from 4/12 to 11/12.
+  </p>
+  <p>
+    <strong>Every multi-package artifact was shipping a dead file.</strong>
+    workapi's green artifact contains <code>internal/store/memory.go</code>. It is
+    one line: <code>package store</code>. The spec asked it to hold the
+    goroutine-safe MemStore; the model wrote MemStore in <code>store.go</code>
+    instead, so memory.go had nothing left to declare, the redeclaration stripper
+    emptied it, and it shipped. Go does not care which file in a package holds what,
+    so the build is green. All four multi-package artifacts carry one of these.
+    <strong>A green build is not the same as the project that was asked for</strong>,
+    and the system had no way to tell the difference. It does now — the check runs
+    when a build goes green and says so.
+  </p>
+  <p>
+    <strong>And the retrieval corpus was teaching the wrong shape to the file that
+    kept failing.</strong> Retrieval itself audits clean: 36 verified examples, every
+    file gets two shots, all role-matched. But for
+    <code>internal/store/memory_test.go</code> — a store unit test — the two examples
+    it hands the model are an <em>HTTP router integration test</em> and an
+    <em>HTTP CRUD test</em>. Wrong domain, and the top one demonstrates the shared
+    table with subtests that the spec and the prompt default now explicitly forbid.
+    The corpus had no store-unit-test contract at all, so the model was getting
+    contradictory instructions: the spec said separate focused functions, and the
+    examples showed a table. One new verified example — separate, self-seeding,
+    <code>errors.Is</code> on the sentinels — and every store test now retrieves the
+    shape it is being asked for.
+  </p>
+  <p class="report__result">
+    That is six mechanisms in one week that looked like they were working and were
+    not: a harness deleting its own evidence, an error surface that hid the bug from
+    the gate written to fix it, a prompt default teaching the failing pattern, a
+    best-of-N that never selected, a green build hiding a dead file, and a corpus
+    contradicting its own specs. None of them was a model limitation. Every one of
+    them was invisible until something counted it. If there is one lesson from the
+    week, it is that: <strong>a system you have not measured is not a system you
+    have</strong>.
+  </p>
+
   <div class="report__meta">
     All training, serving, benchmarking and Builder runs are local on an M1 Max
     with Apple MLX — total cloud spend: $0. The gates, the audit, the spec linter,
