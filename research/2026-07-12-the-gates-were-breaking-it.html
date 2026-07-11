@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #18 — The gates were breaking the files they were repairing · GuildLM Research</title>
+<meta name="description" content="A full-suite sweep — every spec, one run each — puts the system at 19 of 22 green. Then the three failures are read, and the last one is not a model failure at all: the fix loop kept dying on a line no model ever wrote. The gates did it. A gate that inserts an import shifts every line below it, and the next gate — still holding the compiler's stale line numbers — repairs the wrong line. It had been true since the day there were two kinds of gate. The chain is split into phases, a property test is written to pin the split, and it fails on its first run, three more times.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #18 · 2026-07-12</div>
+  <h1>The gates were breaking the files they were repairing</h1>
+  <p class="report__lede">
+    Every spec in the suite, one run each, no retries: <strong>19 of 22 green</strong>.
+    That is the headline, and it is not the interesting part. The interesting part is
+    what the three failures turned out to be — because the last of them was not a
+    model failure at all. The fix loop kept dying on a line that no model had written.
+    The gates had written it.
+  </p>
+
+  <h2>The line nobody wrote</h2>
+  <p>
+    taskapipro's fix loop burned every round it had on this:
+  </p>
+<pre>tk1, _ := models.Task{ID: "1", Title: "task1", Status: "todo"}</pre>
+  <p>
+    A composite literal yields one value. There is no circumstance in which that line
+    is valid Go, and no model produced it — the artifact it came from had
+    <code>tk1 := models.Task{…}</code>, which is fine. Tracing the gate chain pass by
+    pass:
+  </p>
+  <ol>
+    <li><code>_requalify_undefined</code> adds two imports to the top of the file.</li>
+    <li>Every line below them shifts down by two.</li>
+    <li>
+      <code>_fix_assignment_arity</code> — still holding the line numbers the compiler
+      handed it <em>before</em> the insert — applies its repair to line 40, which is no
+      longer the <code>if err := svc.Create(…)</code> it was aimed at, but the
+      <code>tk1 := …</code> above it.
+    </li>
+  </ol>
+  <p>
+    Almost every gate is indexed by a compiler line number. <strong>A gate that inserts
+    a line silently invalidates those numbers for every gate behind it in the same
+    pass.</strong> This has been true since the day there were two kinds of gate. It
+    corrupts a file whenever an import is added alongside an in-place repair, and it
+    presents as "the fix loop failed to converge" — which reads, from the outside,
+    exactly like a model that isn't good enough.
+  </p>
+
+  <h2>The fix, and what the fix taught</h2>
+  <p>
+    The chain now runs in two phases. Phase one is the repairs that rewrite a line
+    <em>in place</em> — safe together, because none of them changes how many lines a
+    file has — and it returns the moment any of them fires, so the caller re-compiles
+    and the next pass gets fresh numbers. Phase two is the line-<em>shifting</em>
+    repairs: an import added, a struct field inserted, a method appended to an
+    interface, a statement hoisted, a file reformatted. One per pass. Nothing runs
+    behind one.
+  </p>
+  <p>
+    I classified the gates into those two phases by reading them. Then I wrote a
+    property test to pin the classification — phase one must not contain a gate that
+    changes a file's line count — and <strong>it failed on its first run, three times
+    over</strong>:
+  </p>
+  <table>
+    <thead><tr><th>Gate</th><th>Looks like</th><th>Actually</th></tr></thead>
+    <tbody>
+      <tr><td><code>_fix_string_int_conversion</code></td><td>a one-line rewrite</td><td><code>string(42)</code> → <code>strconv.Itoa(42)</code> needs an <strong>import</strong></td></tr>
+      <tr><td><code>_fix_errors_wrap</code></td><td>a one-line rewrite</td><td><code>errors.Wrap</code> → <code>fmt.Errorf</code> needs an <strong>import</strong></td></tr>
+      <tr><td><code>_fix_unknown_struct_fields</code></td><td>a one-line rewrite</td><td>inserts a field into a struct</td></tr>
+    </tbody>
+  </table>
+  <p>
+    All three look like single-line repairs. That is precisely why reading the code was
+    not good enough, and why the test now reads the phase-one list out of the chain
+    itself: a gate filed in the wrong phase fails there, instead of quietly corrupting
+    a file six months from now.
+  </p>
+  <p>
+    A second gate bug fell out of the same trace. <code>_fix_assignment_arity</code>,
+    padding a lone <code>err</code>, appended the blank —
+    <code>err, _ := svc.Create(…)</code> — which assigns the <em>Task</em> to
+    <code>err</code>, so the <code>err != nil</code> beside it is a type mismatch. Go
+    puts the error last. The gate was manufacturing the exact defect that
+    <code>_fix_swapped_error_assignment</code> exists to repair: one gate breaking what
+    the next one fixes, and the project only surviving because the second gate happened
+    to run.
+  </p>
+  <p>
+    With both fixed, the gate chain takes the red taskapipro artifact — the one the
+    sweep gave up on — to <strong>green on its own</strong>: seven passes, four packages
+    race-clean, no model involved at any point.
+  </p>
+
+  <h2>The last hard compile class</h2>
+  <p>
+    taskapipro's actual build error had been in my notes for months, labelled "gate
+    candidate, but the physics are different":
+  </p>
+<pre>return paginate(s.store.ListProjects(ctx), limit, offset), nil
+<span class="report__code-note">// multiple-value s.store.ListProjects(ctx) (value of type
+// ([]models.Project, error)) in single-value context</span></pre>
+  <p>
+    <code>ListProjects</code> returns <code>(items, error)</code> and the model used the
+    call as an argument, dropping the error on the floor. Go cannot express that. Every
+    other gate rewrites <em>one line</em>; this one has to <em>introduce statements</em>,
+    which is why it was left alone.
+  </p>
+  <p>
+    What makes it tractable is that the enclosing function's signature settles
+    everything — the error goes to the last result, each earlier result takes its zero
+    value — so the repair is <em>read off the AST</em> rather than invented:
+  </p>
+<pre>items, err := s.store.ListProjects(ctx)
+if err != nil {
+        return nil, err
+}
+return paginate(items, limit, offset), nil</pre>
+  <p>
+    And it refuses whenever the signature does not settle it. The guard that matters is
+    the zero value it cannot <em>prove</em>: <code>models.Project{}</code> looks obvious
+    and is not — if <code>models.Project</code> were an interface, that literal would not
+    compile, and the file cannot see the other package to know. A named type is given a
+    composite literal only when <em>this</em> file declares it a struct. Everything else
+    refuses.
+  </p>
+
+  <h2>A green build is not the project you asked for</h2>
+  <p>
+    One more, found while reading a <em>successful</em> run. workapi's green artifact
+    contains <code>internal/store/memory.go</code>. It is one line long:
+    <code>package store</code>. The spec asked it to hold the MemStore; the model wrote
+    MemStore in store.go instead, so memory.go had nothing left to declare and shipped
+    empty. Go's compilation unit is the package, not the file — so the build is green,
+    the tests pass, and nothing complains. All four multi-package artifacts carry one of
+    these.
+  </p>
+  <p>
+    A prompt telling the model to stay in its lane did not stop it. So it gets a repair,
+    and the repair is safe for a reason that is a fact about the language rather than a
+    clever argument: <strong>moving a declaration between files of the same package
+    cannot change what the program means.</strong> The type, its methods and its
+    constructor move back to the file the plan gave them; each half is given exactly the
+    imports it uses; the whole project is re-checked, and if it is not still green the
+    move is reverted. It was reverted twice while I got it right, and both reverts taught
+    me something I had wrong.
+  </p>
+
+  <p class="report__result">
+    Nine mechanisms this week that looked like they worked and did not — and the last two
+    are the ones I would least have predicted: the gates corrupting the files they were
+    repairing, and a green build hiding a file the spec asked for and never got. Neither
+    was a model limitation. Neither was visible until something counted. The suite stands
+    at <strong>281 tests</strong>, the model has not changed, and the bill is still $0.
+  </p>
+
+  <div class="report__meta">
+    All training, serving, benchmarking and Builder runs are local on an M1 Max
+    with Apple MLX — total cloud spend: $0. The gates, the go/ast rewriters, the
+    audit, the spec linter and the Builder loop:
+    <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
+  </div>
+</article>
+</body>
+</html>

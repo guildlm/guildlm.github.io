@@ -34,6 +34,22 @@
     said (wins <em>and</em> losses). All runs are local, $0, and reproducible.
   </p>
 
+  <a class="logentry" href="2026-07-12-the-gates-were-breaking-it.html">
+    <div class="logentry__date">2026-07-12 · Report #18</div>
+    <div class="logentry__title">The gates were breaking the files they were repairing</div>
+    <div class="logentry__desc">
+      Every spec in the suite, one run each, no retries: 19 of 22 green. Then the three failures get
+      read, and the last one is not a model failure at all — the fix loop kept dying on a line no model
+      had written. The gates had written it. A gate that inserts an import shifts every line below it,
+      and the next gate, still holding the compiler's stale numbers, repairs the wrong line. True since
+      the day there were two kinds of gate, and it presents as "the loop failed to converge" — which
+      reads exactly like a model that isn't good enough. The chain is split into phases; the property
+      test written to pin the split fails on its first run, three more times. Also: the last hard compile
+      class finally gated (a two-value call in a single-value context, repaired off the enclosing
+      signature), and a green build found to be hiding an empty file the spec had asked for.
+    </div>
+  </a>
+
   <a class="logentry" href="2026-07-11-the-backlog-was-empty.html">
     <div class="logentry__date">2026-07-11 · Report #17</div>
     <div class="logentry__title">The backlog was empty — auditing the gates, then moving upstream</div>
