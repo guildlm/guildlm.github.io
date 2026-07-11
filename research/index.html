@@ -34,6 +34,22 @@
     said (wins <em>and</em> losses). All runs are local, $0, and reproducible.
   </p>
 
+  <a class="logentry" href="2026-07-11-the-backlog-was-empty.html">
+    <div class="logentry__date">2026-07-11 · Report #17</div>
+    <div class="logentry__title">The backlog was empty — auditing the gates, then moving upstream</div>
+    <div class="logentry__desc">
+      Gates get written one at a time, by whatever failure is in front of you — a fine way to start and
+      a poor way to continue. So before writing a sixth, I audited the five against 138 real broken
+      artifacts and ranked what was left. The ranking collapsed: counted by distinct spec, no ungated
+      compile class is hit by more than two. The mechanical surface is covered; stop hunting gates. The
+      audit also caught the harness deleting its own evidence (every run rm -rf'd the artifact a gate
+      was verified against), and caught its own first ranking being wrong. With no gate left worth
+      writing, the leverage moved upstream: a prompt default that had been teaching the model the
+      failing pattern for six specs running, and a spec linter that — replayed against history —
+      catches 4/4 of the runs that actually failed.
+    </div>
+  </a>
+
   <a class="logentry" href="2026-07-11-renaming-a-single-letter.html">
     <div class="logentry__date">2026-07-11 · Report #16</div>
     <div class="logentry__title">Renaming a single letter — the gate that needed a parser</div>

@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #17 — The backlog was empty: auditing the gates, then moving upstream · GuildLM Research</title>
+<meta name="description" content="Gates had been picked one at a time, by whatever failure happened to be in front of me. So I audited them against 138 real broken artifacts and ranked what was left. The ranked backlog collapsed: no ungated compile class is hit by more than two specs. The mechanical surface is covered. The audit also caught the harness deleting its own evidence, and — counting specs instead of artifacts — caught its own first ranking being wrong. With no gate left worth writing, the leverage moved upstream: a prompt default that had been teaching the model the failing pattern, and a spec linter that replays against history and catches 4/4 of the runs that actually failed.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #17 · 2026-07-11</div>
+  <h1>The backlog was empty — auditing the gates, then moving upstream</h1>
+  <p class="report__lede">
+    Gates get written one at a time, by whatever failure happens to be in front of
+    you. That is a fine way to start and a poor way to continue: you have no idea
+    whether the thing you just fixed was the common case or a curiosity. So before
+    writing a sixth gate, I stopped and measured — and the measurement said not to
+    write it.
+  </p>
+
+  <h2>The corpus was already there</h2>
+  <p>
+    Every failed Builder run leaves its artifact on disk. That pile is not
+    garbage: it is 138 real, model-written Go projects, most of them broken, each
+    carrying whatever the 7B actually gets wrong. It is the closest thing this
+    project has to a ground-truth dataset, and nobody had ever read it as one.
+  </p>
+  <p>
+    The audit copies each artifact, runs the gate chain to a fixpoint, and asks what
+    is <em>left</em>. Residual compiler diagnostics get normalised to their shape —
+    names and line numbers filed off — and ranked. It separates the two backlogs
+    that always get conflated: artifacts that still do not <strong>compile</strong>
+    (a gate could still help) from those that compile and fail a <strong>test</strong>
+    (only the spec or the model can). It needs no model server, so it is free.
+  </p>
+
+  <h2>It caught the harness eating its own evidence</h2>
+  <p>
+    The first run reported the middleware gate as <em>never firing</em> — a gate I
+    had verified by hand, on a real artifact, hours earlier. The artifact was gone.
+    <code>_ab_run.sh</code> <code>rm -rf</code>s the output directory at the start of
+    every run, so a broken project survived only until the next roll of the same
+    spec.
+  </p>
+  <p>
+    That is worth saying plainly: <strong>the system was deleting the only hard
+    evidence of what the model gets wrong</strong> — the thing every gate is verified
+    against, and the only honest input to deciding what to build next. Failing runs
+    are now archived. Failures are the corpus.
+  </p>
+
+  <h2>Then it caught its own first answer being wrong</h2>
+  <p>
+    The initial ranking put <code>too many arguments in call to newAPI</code> at the
+    top, on four artifacts. All four were the <em>same spec</em>, rolled four times.
+    Counting artifacts lets one spec's quirk outrank a class that is genuinely broad
+    — which is the exact opposite of what a ranked backlog is for.
+  </p>
+  <p>
+    Counted by <em>distinct spec</em>, the whole ranking collapses:
+  </p>
+<pre>=== residual COMPILE classes, by how many DISTINCT SPECS hit them ===
+
+    2  undefined: store
+    2  operator ! not defined on X() (value of type string)
+    2  tt.X (type []models.X has no field or method X)
+    1  too many arguments in call to X
+    1  X redeclared in this block
+    1  … (everything else)</pre>
+  <p>
+    Nothing exceeds two specs. Most classes are hit by exactly one. <strong>There is
+    no broad ungated compile class left.</strong> The five gates cover the mechanical
+    surface, and what remains is a long tail of one-offs. Of the thirteen broken
+    artifacts the current system produces, four already compile clean and fail only
+    an assertion — past where any gate can reach.
+  </p>
+  <p>
+    That is a negative result, and a load-bearing one. It says: stop hunting gates.
+    Which is not a conclusion I would have reached by looking at the next failure,
+    because there is always a next failure.
+  </p>
+
+  <h2>Upstream, then</h2>
+  <p>
+    With the mechanical surface closed, the leverage is in the specs — and two
+    findings there were worth more than another gate.
+  </p>
+  <p>
+    <strong>The Builder's own default was teaching the model the failing pattern.</strong>
+    Six specs in a row died the same death: a <code>duplicate → 409</code> case that
+    got 201, a <code>GET existing → 200</code> case that got 404. The ISOLATE-STATE
+    prompt default told the model, correctly, that every test case must build its own
+    fresh instance of the system under test. That is <em>half</em> a rule. A fresh
+    instance is <strong>empty</strong> — so a "duplicate" case has nothing to
+    duplicate, and it fails no matter how correct the handler is. The model obeyed
+    literally and the default walked it into the bug, six times, while I patched the
+    specs one at a time. The rule is now whole: isolate state, <em>then seed it</em>.
+  </p>
+  <p>
+    <strong>And a spec that no implementation can satisfy should not cost a
+    GPU run.</strong> Every expensive debugging session this week ended at a
+    contradiction that was sitting in the YAML the entire time. So the Builder now
+    lints the spec before it generates anything. The rules are just the failures,
+    written down: a fresh instance per case that also wants a duplicate; a test
+    calling a constructor no implementation promises; one name asked to be both an
+    interface and a struct; and a purpose that <em>forbids the model's idiom</em>
+    ("do NOT model it as an interface") — because empirically the spec loses that
+    argument, and the ban only decides how it breaks.
+  </p>
+  <p>
+    A linter that passes everything proves nothing, so it was replayed against
+    history: checked out at the commit before each fix, it catches
+    <strong>4 out of 4</strong> of the runs that actually failed. And on its first
+    pass over the current suite it immediately found two more instances of the
+    seeding trap that my own hand-grep had missed, because they were phrased
+    differently.
+  </p>
+
+  <p class="report__result">
+    The arc here is the whole thesis in miniature. Writing gates is patching. Reading
+    the corpus, ranking what is left, discovering the backlog is empty, and then
+    fixing the thing upstream that was <em>generating</em> the failures — that is
+    building a system. The moat was never the model, and this week it wasn't even the
+    gates: it was a default that was wrong, a harness that deleted its evidence, and
+    four specs arguing with a 7B they were always going to lose to. The Builder's
+    test suite stands at <strong>253</strong>, on an unchanged model, at $0.
+  </p>
+
+  <div class="report__meta">
+    All training, serving, benchmarking and Builder runs are local on an M1 Max
+    with Apple MLX — total cloud spend: $0. The gates, the audit, the spec linter,
+    the verified retrieval corpus and the Builder loop:
+    <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
+  </div>
+</article>
+</body>
+</html>
