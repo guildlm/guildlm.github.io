@@ -283,10 +283,81 @@
     specs written like an engineer. The Builder's test suite stands at <strong>227</strong>.
   </p>
 
+  <h2>Postscript — three more, and the last one is the worst</h2>
+  <p>
+    The thread kept pulling. Three findings after this report was first published,
+    each one the same shape as the ones above.
+  </p>
+  <p>
+    <strong>A gate that existed and never fired.</strong> The regression sweep put
+    <code>taskapipro</code> back on the middleware wall — the one documented since
+    Report #7 — and there is already a gate for it. It did nothing. The reason: that
+    gate repairs a <em>definition</em> written in the wrong shape, and this
+    generation's definition was <em>right</em>. The call site was wrong. The model
+    declared <code>func Logging(next http.Handler) http.Handler</code>, which
+    already <em>is</em> the <code>Middleware</code> type, and then invoked it —
+    <code>Chain(mux, Logging(logger))</code> — where it should have handed it over:
+    <code>Chain(mux, Logging)</code>. A function whose signature is exactly the
+    wanted named func type is assignable to it by construction, and that is the
+    condition the new gate proves before touching anything. On the real artifact the
+    build goes from failing to build-clean and vet-clean with no model involved.
+  </p>
+  <p>
+    <strong>A gate can't fix what the compiler never printed.</strong> This was the
+    report's own central finding, and it turned out to have a direct mechanical fix.
+    Each Go stage shows a different slice of the truth: <code>go build</code> skips
+    <code>_test.go</code> files entirely, <code>go vet</code> typechecks them but
+    bails at the <em>first</em> type error in a package, and <code>go test</code>
+    compiles the test binary, where the compiler reports up to <em>ten</em> errors.
+    The loop was fixing against the narrow surface. Widening it, measured on two real
+    artifacts by how much the gates can repair from each surface in a single round:
+  </p>
+  <table>
+    <thead>
+      <tr><th>Artifact</th><th>Narrow surface</th><th>Wide surface</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>probe1</td><td>1 diagnostic → 1 file</td><td>8 diagnostics → 2 files</td></tr>
+      <tr><td>tasks-api roll 1</td><td>1 diagnostic → 1 file</td><td>12 diagnostics → 2 files</td></tr>
+    </tbody>
+  </table>
+  <p>
+    In both, the second file is the one carrying the shadowed tester — previously
+    unreachable, now repaired in the <em>same round</em> as the error that was hiding
+    it.
+  </p>
+  <p>
+    <strong>And the worst one: the Builder's own default was teaching the model the
+    failing pattern.</strong> Six specs in a row — usersapi, kvservice, workapi,
+    tasks-api, taskapi, taskapipro — died the same death: a
+    <code>duplicate → 409</code> case that got 201, and a
+    <code>GET existing → 200</code> case that got 404. I had been patching them one
+    spec at a time, which should have been the tell. The cause was upstream of all of
+    them.
+  </p>
+  <p>
+    The Builder's ISOLATE-STATE prompt default told the model, correctly, that every
+    test case must construct its OWN fresh instance of the system under test. That is
+    <em>half</em> a rule. A fresh instance is <strong>empty</strong> — so a
+    "duplicate" case has nothing to duplicate and an "existing record" case has
+    nothing to fetch, and the case fails no matter how correct the handler is. The
+    model obeyed the default literally, and the default walked it into the bug. Six
+    times. The rule is now whole: isolate state, <em>then seed it</em> — any case
+    with a precondition creates that precondition itself, and for stateful CRUD,
+    separate focused functions beat a shared table loop, which pushes you toward
+    exactly this mistake. One fix, upstream, free to every future spec.
+  </p>
+  <p>
+    That is now the count for this session: five gates, three machinery defects, and
+    five specs — including the Builder's own default — that were manufacturing their
+    own failures. Thirteen things that looked like a model ceiling. Not one of them
+    was.
+  </p>
+
   <div class="report__meta">
     All training, serving, benchmarking and Builder runs are local on an M1 Max
     with Apple MLX — total cloud spend: $0. The specs, the gates, the go/ast
-    rewriter, the verified retrieval corpus and the Builder loop:
+    rewriters, the verified retrieval corpus and the Builder loop:
     <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
   </div>
 </article>
