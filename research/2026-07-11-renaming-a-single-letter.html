@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #16 — Renaming a single letter: the gate that needed a parser · GuildLM Research</title>
+<meta name="description" content="The last stochastic failure in the suite was one shadowed identifier: the model writes `for _, t := range tasks`, the loop variable steals the *testing.T, and every t.Fatalf in the body stops compiling. An explicit 'never name a variable t' instruction in the spec did not hold across repeated rolls — the live proof of Report #14's thesis that a nudge is not a gate. So we built the gate. Renaming a single letter safely is exactly where a regex is not good enough, so this one runs on a real go/ast scope walk and refuses the file on anything it cannot resolve. Then we deleted the nudge and let the bug come back, to see whether the gate carries it alone.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #16 · 2026-07-11</div>
+  <h1>Renaming a single letter — the gate that needed a parser</h1>
+  <p class="report__lede">
+    After the sweep and the breadth run, one failure was left standing in the whole
+    suite, and it was a single shadowed identifier. The model writes
+    <code>for _, t := range tasks</code>; the loop variable steals the
+    <code>*testing.T</code>; every <code>t.Fatalf</code> in the body stops
+    compiling. <a href="2026-07-10-a-nudge-is-not-a-gate.html">Report #14</a>
+    argued that a prompt nudge lowers a mistake rate but cannot be relied on to
+    eliminate a class. This bug proved it in the field: an explicit
+    <em>never name a local variable</em> <code>t</code> in the spec did not hold
+    across repeated rolls. So this report does the thing the thesis says to do —
+    builds the gate — and finds that this particular gate cannot be written with a
+    regex at all.
+  </p>
+
+  <h2>The bug, exactly as the model writes it</h2>
+  <p>
+    Here is the real generated file, unedited. It is <em>almost</em> right, which is
+    what makes it interesting:
+  </p>
+<pre>func TestStoreListSorted(t *testing.T) {
+	s := NewStore()
+	tasks := []Task{{Title: "b"}, {Title: "a"}}
+	for _, t := range tasks {                    <span class="report__code-note">// t now shadows *testing.T</span>
+		if err := s.Create(t); err != nil {  <span class="report__code-note">// this t IS the Task — correct</span>
+			t.Fatalf("Create: %v", err)  <span class="report__code-note">// this t was meant to be the tester</span>
+		}
+	}
+	...
+}</pre>
+  <p>
+    The compiler is precise about it:
+    <code>./store_test.go:33:6: t.Fatalf undefined (type Task has no field or method Fatalf)</code>.
+    Note what the author actually meant, because the fix depends on it entirely: inside
+    that loop the <em>bare</em> <code>t</code> is the Task and is exactly right, while
+    <code>t.Fatalf</code> is a reach for the tester that the shadow silently stole. Both
+    readings of the same letter live three lines apart.
+  </p>
+  <p>
+    By the taxonomy from Report #14 this is a gate's job, not a prompt's: the compiler
+    names the defect the same way every time, with a file, a line, a column, the
+    variable, the method and the type. What it is <em>not</em> is regex-able.
+  </p>
+
+  <h2>Why the obvious fix is not safe</h2>
+  <p>
+    The tempting one-liner is to rewrite <code>t</code> to <code>tk</code> inside the
+    loop body. A single letter is the worst possible thing to substitute textually: it
+    occurs as a struct field in <code>x.t</code>, as a map key, as a label, inside
+    strings and comments, and — worst — inside a <em>nested</em> loop that re-shadows it
+    again, where the same token means a third thing. And the rename must be
+    <em>selective</em>: it has to rewrite <code>s.Create(t)</code> but deliberately leave
+    <code>t.Fatalf</code> alone, because leaving it alone is the entire point. A
+    text-level tool cannot tell those two <code>t</code>s apart. A scope-aware one can.
+  </p>
+  <p>
+    So this gate is the first one in the project that shells out to a real parser. The
+    rewrite lives in <code>tools/shadowfix.go</code> and runs on <code>go/ast</code>:
+    it finds functions that actually take a <code>t *testing.T</code>, finds the
+    declarations that shadow it, computes the scope each shadow is visible over, and
+    renames the declaration plus every non-tester use inside that scope to a fresh name
+    that collides with nothing in the function. <code>t.&lt;testing method&gt;</code> is
+    left untouched, so it binds to the un-shadowed tester again. The Go toolchain was
+    already a hard dependency of the build loop — every candidate is compiled, vetted
+    and raced — so leaning on Go's own parser costs nothing new.
+  </p>
+
+  <h2>What it refuses to do</h2>
+  <p>
+    The gate is written to be safe by construction, which mostly means knowing when to
+    do nothing. It bails out — leaving the file exactly as the model wrote it — on every
+    construct whose meaning it cannot settle without a full type-checker:
+  </p>
+  <ul>
+    <li>
+      <strong>An inner re-shadow.</strong> Two nested bindings of <code>t</code> mean a
+      use in the inner body could belong to either. Refuse.
+    </li>
+    <li>
+      <strong>A declaration in an <code>if</code>/<code>for</code>/<code>switch</code>
+      init clause.</strong> <code>if t := tasks[0]; t.ID == 0 {…}</code> scopes
+      <code>t</code> to that statement only — but the innermost enclosing
+      <em>block</em> is wider than that, so renaming across it would rewrite the real
+      tester further down. This one was a genuine soundness hole in the first draft,
+      caught while re-reading the scope resolution, and it is now an explicit refusal.
+    </li>
+    <li>
+      <strong>A domain type that declares a testing-shaped method.</strong> If
+      <code>Task</code> itself has an <code>Error()</code> — and a Go type very often
+      does — then <code>t.Error(...)</code> inside the shadow is genuinely ambiguous.
+      Refuse rather than guess.
+    </li>
+    <li>
+      <strong>A key or a label named <code>t</code>.</strong> A struct field key and a
+      map key are indistinguishable in the AST without types. Refuse.
+    </li>
+    <li>
+      <strong>A shadow that is never used as a tester.</strong>
+      <code>for _, t := range tasks { total += t.ID }</code> compiles perfectly well and
+      is none of our business.
+    </li>
+  </ul>
+  <p>
+    There is also a structural safety property worth stating plainly, because it bounds
+    the blast radius of the whole idea: this gate can only ever touch a file the compiler
+    has <em>already rejected</em> with this specific error. A green file never produces
+    the error, so the gate never fires on one. It cannot regress working code; the worst
+    it can do is fail to help.
+  </p>
+
+  <h2>Verification</h2>
+  <p>
+    Seventeen unit tests, and the ones that matter are the refusals — every bullet above
+    has a test that asserts the gate does <em>nothing</em>. The rewrite itself is checked
+    on the real, unedited artifact that produced the bug: before,
+    <code>go vet</code> stops at <code>t.Fatalf undefined</code>; after, that error is
+    gone and vet has moved on to an unrelated pre-existing defect elsewhere in the file.
+    The output is gofmt-clean, because it is printed by <code>go/format</code> rather than
+    patched as text.
+  </p>
+  <p>
+    Then we ran the spec, three times, to watch the gate fire in a real build. It never
+    fired. What happened instead is the actual subject of this report.
+  </p>
+
+  <h2>The gate could not see the bug</h2>
+  <p>
+    All three rolls failed, and none of them failed on the shadow. They failed on
+    <code>undefined: NewStore</code> — and the shadow bug was sitting right there in the
+    artifact, three lines further down a file the compiler never got to. <strong>A gate
+    cannot repair an error the compiler declines to print.</strong> <code>go build</code>
+    does not compile test files at all, and <code>go vet</code> stops at the first error;
+    while anything ahead of it was broken, the shadow was invisible.
+  </p>
+  <p>
+    So the failing thing was store.go. The spec told it, emphatically, to be a single
+    concrete struct with a constructor named <em>exactly</em> <code>NewStore</code>. Every
+    roll wrote a <code>Store</code> <em>interface</em> with a <code>StoreImpl</code> built
+    by <code>NewStoreImpl</code> instead — so nothing named <code>NewStore</code> existed,
+    and every file the spec had pinned to that name failed to compile.
+  </p>
+  <p>
+    Pulling that thread found three separate defects, none of them in the model:
+  </p>
+  <ul>
+    <li>
+      <strong>The fix loop was beating on the wrong file.</strong> The compiler reports
+      <code>undefined: NewStore</code> at the USE site — the test — so the loop spent all
+      five rounds regenerating the test, and never once regenerated the file that owed the
+      constructor. There was already root-cause routing for exactly this, but only for
+      <code>undefined: pkg.Sym</code>, where the package name says who owes it. A
+      single-package project gets a bare <code>undefined: NewStore</code> and no hint, so
+      the routing never ran. It now routes to the non-test file whose spec purpose
+      <em>promises</em> the symbol.
+    </li>
+    <li>
+      <strong>The root-cause routing believed the shadow error.</strong>
+      <code>t.Fatalf undefined (type Task has no field or method Fatalf)</code> reads
+      exactly like a genuinely missing method, and the routing took it at face value: it
+      added task.go to the fix targets and invited the model to give <code>Task</code> a
+      <code>Fatalf</code> method. It now recognises the shadow and stays out of the way.
+    </li>
+    <li>
+      <strong>A regex had been quietly eating a letter.</strong> The undefined-symbol
+      pattern matched the name as <code>(\w+)(?!\s*\.)</code>, and <code>\s*</code> crosses
+      newlines: with <code>undefined: NewStore</code> followed by a line starting
+      <code>./store_test.go</code>, the engine backtracks onto that leading dot and the
+      match shrinks to <code>NewStor</code> — a symbol that does not exist. It had been
+      silently truncating symbols in multi-error output all along. A <code>\b</code>
+      forbids the shrink.
+    </li>
+  </ul>
+  <p>
+    With the routing fixed, store.go was regenerated five times with
+    <code>undefined: NewStore</code> right there in the prompt. The model wrote
+    <code>NewStoreImpl</code> every single time. The prior does not move — so it got a
+    gate too: when exactly one zero-argument constructor in the package builds the same
+    thing under another name, alias the promised name onto it
+    (<code>func NewStore() *StoreImpl { return NewStoreImpl() }</code>), which compiles by
+    construction. On the real artifact the gate chain now carries the project from
+    <code>undefined: NewStore</code> to build-clean <em>and</em> vet-clean with no model
+    involved at all.
+  </p>
+
+  <h2>But the spec was the one at fault</h2>
+  <p>
+    Two more rolls failed a new way: a <code>Store</code> interface <em>and</em> a
+    <code>Store</code> struct, in the same file — <code>Store redeclared in this block</code>.
+    And that is the tell. The model wants a <code>Store</code> interface in every single
+    generation. The spec was demanding that the <em>concrete</em> type take the name the
+    model reserves for the interface, so its two natural declarations collided head-on. The
+    collision was manufactured by the ask.
+  </p>
+  <p>
+    So stop fighting it — the <a href="2026-07-09-the-wall-was-the-shape-of-the-ask.html">workapi
+    lever</a> again. The spec now asks for exactly what the model already wants to write,
+    with the names pinned so that nothing can collide: a <code>Store</code> interface, a
+    <code>MemStore</code> struct implementing it, and
+    <code>func NewStore() Store { return &amp;MemStore{...} }</code>. The redeclaration is now
+    structurally impossible, because the two types no longer share a name.
+    <strong>tasks-api greens 2/2, first try, race-clean.</strong> The last stochastic spec in
+    the suite is closed.
+  </p>
+  <p>
+    Credit where it is due, though: <em>the gates did not fire in those green rolls.</em> The
+    green came from the spec realignment. The gates are proven separately — unit tests, and
+    a real artifact driven from broken to vet-clean by the gate chain alone — but they are
+    not what made this spec green, and it would be easy and wrong to imply otherwise.
+  </p>
+
+  <h2>The probe, and an honest inconclusive</h2>
+  <p>
+    A gate that never fires proves nothing, so — the subtractive method from Report #14 —
+    we deleted the anti-shadowing instruction from the spec entirely and ran it three times.
+    The shadow bug came back in <strong>all three</strong>, which at least settles that the
+    nudge was doing real work. But the probe cannot answer the question it was asked: all
+    three runs failed on <em>other</em> stochastic test-authoring bugs (a test reaching for
+    the concrete constructor; a test wiring the router without the API in between), and those
+    failures masked the shadow from the compiler all over again. Given the shadow error
+    directly, the gate fires and repairs the probe's own file correctly. "Green without the
+    nudge" was not demonstrated. Recorded as inconclusive rather than dressed up.
+  </p>
+
+  <h2>And a sweep, which found a spec arguing with itself</h2>
+  <p>
+    A regex used by one of the oldest gates had changed, so the whole suite got re-run.
+    Seven of eight specs green; <code>taskapi</code> red — and none of the new gates had
+    fired in that run at all (build and vet were clean, only a test failed), so it was not a
+    regression but something the sweep simply exposed.
+  </p>
+  <p>
+    Its spec said <em>"each case builds a FRESH router+store"</em> and then asked, in the
+    same breath, for a <code>duplicate id → 409</code> case and a
+    <code>GET existing → 200</code> case. Neither can pass against a store nobody has
+    written to. The model obeyed literally — one shared table loop, a fresh empty store per
+    subtest — and got 201 where it wanted 409, and 404 where it wanted 200. The instruction
+    defeated itself, and the model was right. Split into focused functions that each POST
+    their own precondition before asserting on it, it greens 2/2, race-clean — the fifth
+    spec closed by that same lever.
+  </p>
+
+  <p class="report__result">
+    The headline is not the gate. It is that building the gate uncovered three pieces of
+    machinery mis-handling the very error it was written for — a fix loop routing to the
+    wrong file, a root-cause widener that believed a shadow was a missing method, and a
+    regex that had been truncating symbol names in every multi-error build — and then two
+    specs that were manufacturing their own failures: one demanding a name the model
+    reserves for something else, one asking for a duplicate on an empty store. Not one of
+    those five was a model limitation. That keeps being the finding. The moat is still the
+    system: a fixed 7B, an agentic loop, a verified corpus, a growing set of gates, and
+    specs written like an engineer. The Builder's test suite stands at <strong>227</strong>.
+  </p>
+
+  <div class="report__meta">
+    All training, serving, benchmarking and Builder runs are local on an M1 Max
+    with Apple MLX — total cloud spend: $0. The specs, the gates, the go/ast
+    rewriter, the verified retrieval corpus and the Builder loop:
+    <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
+  </div>
+</article>
+</body>
+</html>

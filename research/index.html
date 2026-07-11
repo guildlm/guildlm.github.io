@@ -34,6 +34,24 @@
     said (wins <em>and</em> losses). All runs are local, $0, and reproducible.
   </p>
 
+  <a class="logentry" href="2026-07-11-renaming-a-single-letter.html">
+    <div class="logentry__date">2026-07-11 · Report #16</div>
+    <div class="logentry__title">Renaming a single letter — the gate that needed a parser</div>
+    <div class="logentry__desc">
+      One stochastic failure was left standing in the suite, and it was a single shadowed identifier:
+      <code>for _, t := range tasks</code> steals the *testing.T and every t.Fatalf stops compiling. It
+      is the one gate a regex cannot write — the same letter means the Task on one line and the tester
+      three lines down — so it runs on a real go/ast scope walk and refuses the file on anything it
+      cannot resolve. Then we ran it, and it never fired: the compiler was stopping earlier, and the
+      shadow was invisible behind it. Pulling that thread found three defects in the machinery, none of
+      them in the model — a fix loop routing to the wrong file, a root-cause widener that believed the
+      shadow was a genuinely missing method, and a regex that had been quietly truncating symbol names —
+      and a spec that was manufacturing its own failure by demanding a name the model reserves for
+      something else. Fixing the ask greens the spec 2/2. The subtractive probe is recorded as
+      inconclusive.
+    </div>
+  </a>
+
   <a class="logentry" href="2026-07-10-breadth-new-domains.html">
     <div class="logentry__date">2026-07-10 · Report #15</div>
     <div class="logentry__title">Breadth: three new domains join the suite</div>
