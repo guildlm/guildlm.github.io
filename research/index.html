@@ -34,6 +34,23 @@
     said (wins <em>and</em> losses). All runs are local, $0, and reproducible.
   </p>
 
+  <a class="logentry" href="2026-07-12-the-tests-were-wrong.html">
+    <div class="logentry__date">2026-07-12 · Report #20</div>
+    <div class="logentry__title">The tests were wrong. So was the ruler.</div>
+    <div class="logentry__desc">
+      The coverage sweep the last report promised. Two of three specs went red — and not one of the reds
+      was the model's fault: every one was a test that no correct implementation could have passed. An
+      invalid state made unreachable by the spec's own defaulting rule; a row expecting nil inside a loop
+      that demands an error; and a request replayed after its body was already drained, so a handler that
+      maps ErrExists to 409 perfectly correctly answers 400. That last one had a rule against it already —
+      a rule that named the mechanism and predicted the exact wrong status code — and the model walked into
+      it anyway, because the rule named the <em>body</em> and the model reused the <em>request</em>. A gate
+      is only as good as the sentence it listens for; a default is only as good as the noun the model acts
+      on. Then the ruler itself lied three times, the last time because the line-shifting gates poison their
+      own scoreboard — caught only because the number it produced was arithmetically impossible.
+    </div>
+  </a>
+
   <a class="logentry" href="2026-07-12-the-sentence-the-gate-listens-for.html">
     <div class="logentry__date">2026-07-12 · Report #19</div>
     <div class="logentry__title">A gate is only as good as the sentence it listens for</div>

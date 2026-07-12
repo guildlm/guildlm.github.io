@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #20 — The tests were wrong. So was the ruler. · GuildLM Research</title>
+<meta name="description" content="The coverage sweep the last report promised. Two of three specs went red — and not one of the reds was the model's fault: every one was a test that no correct implementation could have passed. Then the ruler that was supposed to score the work lied three separate times, the last time because the gates themselves poison it.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #20 · 2026-07-12</div>
+  <h1>The tests were wrong. So was the ruler.</h1>
+  <p class="report__lede">
+    The last report ended with a promise: coverage was going in, and the next sweep
+    would measure <em>both</em> numbers, because a coverage gain paid for with a green
+    loss is not a gain. This is that sweep. Two of three specs went red — and not one
+    of the reds was the model's fault. All three were tests that no correct
+    implementation could have passed. Then the ruler that was supposed to score the
+    work lied three separate times, and the last lie was told by the gates.
+  </p>
+
+  <h2>Why coverage at all</h2>
+  <p>
+    Green is a shallow claim. It says the tests that exist pass. It says nothing about
+    whether those tests <em>reach</em> the code that shipped. The <code>store</code>
+    packages sat at a flat <strong>50.9%</strong> for weeks, and the reason turned out
+    to be arithmetic: eight methods, four for Task and four mirrored for Project, and
+    only the Task four were ever called. A method nobody calls is a method nobody has
+    shown to be correct. So the specs grew a <code>models_test.go</code> and the
+    Project half of the store tests, and the sweep began printing green and coverage
+    side by side. Neither is the score. The pair is.
+  </p>
+
+  <h2>Three tests that failed against a correct implementation</h2>
+  <p>
+    <strong>An unreachable state.</strong> <code>workapi</code>'s config test was asked
+    to prove that an empty <code>AuthToken</code> fails <code>Validate()</code>. The
+    model wrote correct code and the test failed anyway, because the spec's <em>own</em>
+    defaulting rule makes that state impossible to reach:
+  </p>
+<pre>func getenv(key, fallback string) string {
+        if v := os.Getenv(key); v != "" { return v }
+        return fallback                    <span class="report__code-note">// AUTH_TOKEN="" is UNSET, so → "secret"</span>
+}
+
+t.Setenv("AUTH_TOKEN", "")
+got, _ := Load()                           <span class="report__code-note">// token is now "secret" — NOT empty</span>
+err := got.Validate()                      <span class="report__code-note">// correctly nil. Test fails.</span></pre>
+  <p>
+    A constructor that validates before it returns can never hand you an invalid
+    value — that is its entire job. On failure it gives back the zero value, and the
+    zero value usually <em>passes</em> the very check you were trying to fail. The
+    spec named the assertion and left the <em>construction</em> unpinned, so the model
+    reached for <code>Load()</code> like its neighbours did, down a path that cannot
+    produce the state. <code>taskapipro</code> carried the identical latent bug and
+    passed only because its model happened to build the struct literal directly.
+    Nothing in the spec required it. A stochastic pass is not a pass.
+  </p>
+  <p>
+    <strong>An unsatisfiable row.</strong> The spec said <em>write separate focused
+    test functions</em>. The model built a table anyway — and dropped a valid
+    <code>"done"</code> status into the <em>bad</em>-status table with
+    <code>expected: nil</code>, under a loop whose assertion demands an error from
+    every row:
+  </p>
+<pre>{"bad status with done status", Task{Status: "done"}, nil},   <span class="report__code-note">// expects nil…</span>
+...
+if err == nil { t.Errorf("expected %v, got nil", tc.expected) } <span class="report__code-note">// …but the loop demands an error</span></pre>
+  <p>
+    The tell is the error message itself — <code>expected &lt;nil&gt;, got nil</code>,
+    a sentence that cannot mean anything. That row is unsatisfiable by construction; no
+    code that could ever be written makes it pass. The default already said
+    <em>prefer focused functions over a table</em>, and the model built a table anyway.
+    So rather than say it louder, the rule now makes the table <strong>safe</strong>:
+    one function, one outcome — every row expects the same kind of result, because the
+    assertion after the loop is shared and can only express one.
+  </p>
+
+  <h2>A default is only as good as the noun the model acts on</h2>
+  <p>
+    The third red is the sharpest thing in this report. <code>taskapipro</code>'s router
+    test reported <code>want 409, got 400</code> — against a handler that maps
+    <code>ErrExists</code> to <code>409</code> perfectly correctly. The bug is in the
+    test, and it is a real Go trap:
+  </p>
+<pre>req := httptest.NewRequest("POST", "/tasks", bytes.NewBufferString(body))
+h.ServeHTTP(w, req)                <span class="report__code-note">// first call DRAINS the body</span>
+w = httptest.NewRecorder()         <span class="report__code-note">// fresh recorder…</span>
+h.ServeHTTP(w, req)                <span class="report__code-note">// …same req. Body is empty now.</span></pre>
+  <p>
+    A request's <code>Body</code> is an <code>io.Reader</code>. The first
+    <code>ServeHTTP</code> reads it to EOF, so the second call sends an <em>empty</em>
+    body, <code>json.Decode</code> fails, and the handler answers <code>400</code> —
+    long before any duplicate check runs. The 409 path is never reached.
+  </p>
+  <p>
+    Here is what makes it sharp. The rule was <strong>already there</strong>, and it was
+    already right:
+  </p>
+<pre>HTTP-TEST HYGIENE: build a FRESH request <span class="report__code-note">body</span> for every request — an
+io.Reader/bytes.Buffer is drained after one read, so reusing it sends an
+empty body on the second request (<span class="report__code-note">a re-POST then wrongly returns 400 instead of 409</span>).</pre>
+  <p>
+    It names the mechanism. It predicts the exact wrong status code, in advance, in
+    parentheses. And the model walked straight into it — because the sentence names the
+    <strong>body</strong>, and the object the model reused was the <strong>request</strong>.
+    It even <em>thought about freshness</em>: it built a fresh recorder, which nothing had
+    asked for, while handing the same <code>req</code> to <code>ServeHTTP</code> twice.
+  </p>
+  <p>
+    The last report's finding was that a gate is only as good as the sentence it listens
+    for. This is its twin on the other side of the loop: <strong>a default is only as
+    good as the noun the model acts on.</strong> Bind a correct rule to the wrong noun and
+    it behaves exactly as if it were not there. The rule now names
+    <code>*http.Request</code>, forbids reusing <code>req</code>, and simply shows the
+    two-request shape.
+  </p>
+
+  <h2>The ruler lied three times</h2>
+  <p>
+    With the reds understood, the remaining question was whether the coverage work had
+    actually bought anything. Answering it meant building an instrument — and the
+    instrument was wrong three times before it was right once.
+  </p>
+  <p>
+    <strong>It measured a different thing than the baseline.</strong> The first numbers
+    disagreed with the recorded history: <code>store</code> 50.9% → 58.5%,
+    <code>models</code> 0% → 25%. That is not progress, it is a definition swap. Two
+    different questions had been given the same name: <em>does this package have tests of
+    its own</em>, and <em>is this code executed by any test in the module</em>. The
+    <code>models</code> package scores 25% on the second while scoring 0 on the first,
+    purely because the store and api tests construct <code>models</code> values while
+    testing themselves. A metric that quietly changes definition manufactures progress out
+    of nothing. Both are now printed, and labelled.
+  </p>
+  <p>
+    <strong>It double-counted.</strong> Under <code>-coverpkg=./...</code> every test
+    binary instruments every package, so the merged profile lists each block once
+    <em>per binary</em> — store's blocks with <code>count&gt;0</code> from the store
+    binary, and the same blocks with <code>count=0</code> from the models binary. Summing
+    the lines naively counts a block N times in the denominator and once in the numerator.
+    It reported the coverage push as a <em>regression</em>.
+  </p>
+  <p>
+    <strong>And then the gates poisoned it.</strong> Even deduplicated, the ruler put
+    <code>internal/api</code> at <strong>58.5%</strong> while <code>go</code> itself said
+    <strong>69.0%</strong>. That is not a finding — it is impossible. The second number is
+    a strict subset of the first: code executed by <em>any</em> test cannot be less than
+    code executed by the package's <em>own</em> tests. Only the impossibility caught it. The
+    profile held the same block twice, one line apart:
+  </p>
+<pre>middleware.go:14.60,15.37       middleware.go:18.2,18.10
+middleware.go:15.60,16.37       middleware.go:19.2,19.10   <span class="report__code-note">// the same code, shifted</span></pre>
+  <p>
+    A cached coverage row is keyed to the line numbers it was recorded at. <strong>The gate
+    chain shifts lines</strong> — that is exactly what it does when it inserts a missing
+    import, and it is the same physics that made the gates corrupt the files they repaired
+    two reports ago. Go's test cache had rows from <em>before</em> the shift and rows from
+    after, and the merge kept both: every statement counted twice in the denominator, once
+    in the numerator. The line-shifting gates do not only damage the files they fix. They
+    poison the instrument that measures them. <code>-count=1</code>, everywhere, forever.
+  </p>
+
+  <h2>A bug with no sentence at all</h2>
+  <p>
+    All three rules went into the Builder's permanent defaults rather than into the
+    three specs that surfaced them — each is latent in every spec of its shape, and the
+    request trap alone is live in five. But a default is global, so it has to be swept:
+    seven other specs, regenerated from scratch. <strong>Six came back green.</strong> The
+    seventh, <code>ratelimit</code>, went red — and it is worth the space, because it is
+    not a regression and it is not a model that can't write Go.
+  </p>
+  <p>
+    The defaults only enter the prompt for <code>*_test.go</code> files. The bug is in
+    <code>api.go</code>:
+  </p>
+<pre>func NewRouter(reg *Registry) http.Handler {
+        mux := http.NewServeMux()
+        mux.HandleFunc("GET /ping", PingHandler)
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+                if r.URL.Path == "/ping" {
+                        PingHandler(w, r)     <span class="report__code-note">// RateLimit is never applied</span>
+                } else {
+                        mux.ServeHTTP(w, r)
+                }
+        })
+}</pre>
+  <p>
+    <code>RateLimit</code> is declared, and never called. Asked to limit one route and
+    leave another unlimited, the model hand-rolled a dispatcher and dropped the middleware
+    on the floor. Every request is allowed; every rate-limit test fails.
+  </p>
+  <p>
+    And here is the part that matters. An unused package-level function is <em>legal Go</em>.
+    The build is green. <code>go vet</code> is green. The compiler has <strong>nothing to
+    say</strong> — so the gate that exists for exactly this bug cannot fire, because there is
+    no error message for it to listen for. Not the wrong sentence, as in the last report.
+    <em>No sentence.</em> The only thing that notices is the test. This is the honest floor of
+    the deterministic layer: gates repair what the compiler can name, and a semantic hole
+    that compiles cleanly is not theirs to catch. The spec now shows the exact wrapping
+    shape instead of describing it — the same lever that took the workapi wall down: make
+    the ask concrete, and there is nothing left to invent. The model wrote it straight
+    back:
+  </p>
+<pre>mux.Handle("GET /ping", RateLimit(reg)(http.HandlerFunc(PingHandler)))</pre>
+  <p>
+    Green, 75.4% of statements executed. Ten specs regenerated from scratch across this
+    session — three for coverage, seven to sweep the defaults — and all ten are green.
+  </p>
+
+  <h2>What it actually bought</h2>
+<pre>                green      store (own)      models (own)     exec-total
+  taskapi         ✅       50.9% → 100%       0% → 100%         62.8%
+  taskapipro      ✅            → 100%        0% → 100%         64.1%
+  workapi         ✅            → 100%        0% → 100%         70.9%</pre>
+  <p>
+    Every mirrored Project method in every store is now executed. Every field rule in
+    every <code>models</code> package is now tested directly, where before it was reached
+    only by accident, through somebody else's test. All three specs are green, and the
+    coverage that was there before is still there. The trade the last report was afraid of
+    — buying depth with green — did not happen. It only <em>looked</em> like it had, for as
+    long as the ruler was broken.
+  </p>
+
+  <p class="report__result">
+    This week's pattern was mechanisms that look like they work. Today it went one layer
+    out. Every red in this sweep was <em>upstream of the model</em>: three times it wrote
+    correct Go and was marked wrong by a test that no correct program could satisfy. And
+    every time the measurement disagreed with reality, the measurement was what was broken —
+    including, in the end, because the repair machinery was corrupting its own scoreboard.
+    None of it was visible until something counted, and the one lie that got caught was
+    caught only because it was <em>arithmetically impossible</em>, not because it looked
+    wrong. Ten specs regenerated from scratch, ten green, the Builder's suite at
+    <strong>290 tests</strong>. The model has not changed since April. The bill is still $0.
+  </p>
+
+  <div class="report__meta">
+    All training, serving, benchmarking and Builder runs are local on an M1 Max
+    with Apple MLX — total cloud spend: $0. The gates, the go/ast rewriters, the
+    audit, the archive and the Builder loop:
+    <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
+  </div>
+</article>
+</body>
+</html>
