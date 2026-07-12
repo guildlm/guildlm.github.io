@@ -255,6 +255,50 @@ middleware.go:15.60,16.37       middleware.go:19.2,19.10   <span class="report__
     <strong>290 tests</strong>. The model has not changed since April. The bill is still $0.
   </p>
 
+  <h2>Postscript: I walked into it myself</h2>
+  <p>
+    The fix in this report broke something. The rewritten HTTP rule went into the global
+    defaults, the regression sweep ran — as a global default forces you to — and
+    <code>taskapipro</code> came back red with every seeded case failing at once:
+    the duplicate answered <code>201</code>, the record just POSTed answered
+    <code>404</code>, the list came back empty. Against a perfectly correct handler,
+    again.
+  </p>
+<pre>newRouter().ServeHTTP(resp, httptest.NewRequest(...))   <span class="report__code-note">// seed → a NEW store</span>
+resp = httptest.NewRecorder()
+newRouter().ServeHTTP(resp, httptest.NewRequest(...))   <span class="report__code-note">// assert → ANOTHER new store</span></pre>
+  <p>
+    The model had started building a fresh router — and therefore a fresh, empty store —
+    <em>inside every request</em>. The POST that seeds the precondition wrote to a store
+    thrown away on the next line.
+  </p>
+  <p>
+    I caused that. My new rule said <em>every ServeHTTP call gets its own
+    <code>*http.Request</code></em>, and my example called <code>h.ServeHTTP(…)</code>
+    without ever showing where <code>h</code> came from. Read next to the older rule —
+    <em>ISOLATE STATE: construct your OWN fresh instance</em> — the model did the
+    consistent thing and freshened the router too. The rule was right; the example failed
+    to pin the invariant it needed preserved.
+  </p>
+  <p>
+    Which is this report's own thesis, collected from its own author. It is not that the
+    model is careless. It is that <strong>a rule lands on a noun</strong>, and if you do
+    not say which noun, the model will pick one — and it will pick consistently, and it
+    will be wrong. Two things are fresh at two different rhythms, and the default now says
+    so out loud: the <strong>router and its store, once per test function</strong>, because
+    that is what isolates one test from another; the <strong>request and the recorder, once
+    per call</strong>, because a body is drained by its first read. The example now opens
+    with <code>h := newRouter()</code> and threads that same <code>h</code> through both
+    requests. The model writes it straight back.
+  </p>
+  <p>
+    Nothing but the sweep would have caught it. That is the argument for paying for one
+    every single time a global default moves. Final state: <strong>eleven specs
+    regenerated, eleven green</strong>, the gate chain still driving five of the archived
+    red projects to green on its own, and the config seam — the code path every deployment
+    goes through, which no test had ever executed — now covered in all three backends.
+  </p>
+
   <div class="report__meta">
     All training, serving, benchmarking and Builder runs are local on an M1 Max
     with Apple MLX — total cloud spend: $0. The gates, the go/ast rewriters, the
