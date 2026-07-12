@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #19 — A gate is only as good as the sentence it listens for · GuildLM Research</title>
+<meta name="description" content="Three specs failed a sweep. In all three the gate already existed, and in all three it repaired the file perfectly the moment it was handed it. None of them fired, because the compiler had reported the same bug in a sentence they were not listening for. Then: the failure artifacts the harness used to delete become a corpus, and the corpus becomes a test suite — the gate chain now drives five of eight red projects to green on its own, with no model involved. And a new metric, because a green build turns out to be a shallow claim: the biggest projects run only a quarter of their own code.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #19 · 2026-07-12</div>
+  <h1>A gate is only as good as the sentence it listens for</h1>
+  <p class="report__lede">
+    Three specs went red in a verification sweep. In all three, the gate that
+    repairs the bug already existed. In all three, it fixed the file perfectly the
+    moment it was handed it. And in all three, it never fired — because the
+    compiler had reported the same defect in a sentence the gate was not listening
+    for. From the outside, all three looked exactly like a model that isn't good
+    enough.
+  </p>
+
+  <h2>The same bug, a different sentence</h2>
+  <p>
+    <strong>The shadowed tester, in disguise.</strong> The gate that renames a loop
+    variable stealing the <code>*testing.T</code> watches for
+    <code>t.Fatalf undefined (type Task has no field or method Fatalf)</code>. But
+    the model wrote:
+  </p>
+<pre>func TestCreateOK(t *testing.T) {
+        ...
+        t := models.Task{ID: tid, ...}      <span class="report__code-note">// t is ALREADY the parameter</span></pre>
+  <p>
+    In a function whose parameter is already <code>t</code>, this shadows nothing —
+    a parameter lives in the body's own scope — so Go reads it as an
+    <em>assignment</em> to the tester and complains about the type instead:
+    <code>cannot use models.Task{…} as *testing.T value in assignment</code>. And
+    because nothing is shadowed, <code>t.Fatalf</code> still resolves to
+    <code>*testing.T</code> — so the message the gate is watching for
+    <strong>never appears at all</strong>. Same mistake. Same repair. One regex
+    stood between a working gate and a red spec.
+  </p>
+  <p>
+    <strong>A stdlib package with the module path glued on.</strong>
+    <code>import "guildlm.dev/workapi/internal/slog"</code>, meaning
+    <code>"log/slog"</code>. The phantom-import gate looks for a <em>project</em>
+    package that exports the symbols; <code>slog.New</code> lives in none, so the
+    search came back empty and it gave up. But the phantom's last segment names a
+    stdlib package, and the path is simply the real one with a module in front of
+    it.
+  </p>
+  <p>
+    <strong>In a test, an error is caught, not propagated.</strong>
+    <code>if !errors.Is(Decode("!"), ErrBadCode)</code> — a two-value call in a
+    one-value slot. The hoist gate refused, and correctly under its own rule: a
+    test returns nothing, so there is nowhere to propagate the error <em>to</em>.
+    But a test doesn't propagate an error, it catches one — and
+    <code>errors.Is(X, …)</code> tells us with certainty that X is the <em>error</em>
+    of the two returns. That is the one shape where the choice is not a guess, so
+    that is the only shape the gate now accepts. Ask it to repair
+    <code>if Decode("x") != 5</code>, which wants the <em>value</em>, and it still
+    refuses.
+  </p>
+
+  <h2>The failures were the corpus all along</h2>
+  <p>
+    Yesterday's audit caught the harness <code>rm -rf</code>-ing its output
+    directory on every run — quietly deleting the only hard evidence of what the
+    model actually gets wrong. Failures are now archived. Today that archive stopped
+    being evidence and became something better.
+  </p>
+  <p>
+    Re-driving the gate chain over every red artifact the archiver has kept — free,
+    no model server, just the Go toolchain — answers the only question that matters
+    about the gates:
+  </p>
+<pre>=== driving the gate chain over 8 archived RED artifacts ===
+
+  advanced        _fail-ratelimit-…
+  advanced        _fail-shortener-…
+  GREEN-BY-GATES  _fail-shortener-…
+  GREEN-BY-GATES  _fail-taskapipro-…
+  GREEN-BY-GATES  _fail-taskapipro-…
+  GREEN-BY-GATES  _fail-workapi-…
+  GREEN-BY-GATES  _fail-workapi-…
+  advanced        _proof-middleware-wall
+
+  5 green by the gates alone · 3 advanced · 0 stuck</pre>
+  <p>
+    <strong>Five of eight projects the model broke are now driven all the way to
+    green by the deterministic repairs alone</strong> — build, vet and
+    <code>-race</code>, with the model never invoked. A week ago that number was
+    zero, and I reported it as zero.
+  </p>
+  <p>
+    The three that only <em>advance</em> are the honest boundary: two are failing
+    assertions whose specs have since been fixed, and one compiles clean and fails
+    at runtime. That is the semantic layer, correctly out of a gate's reach. And the
+    <em>zero stuck</em> matters as much: there is no archived failure the gates
+    cannot move at all.
+  </p>
+  <p>
+    So the archive became a test suite. A gate change that breaks the chain passes
+    every unit test — each one checks a single gate against a single fixture — and
+    would otherwise be caught only by a sweep costing hours of GPU. Now the five are
+    a lock, checked in seconds.
+  </p>
+
+  <h2>A green build is a shallow claim</h2>
+  <p>
+    One more measurement, and it is not a flattering one. Coverage across the suite:
+  </p>
+  <table>
+    <thead><tr><th>Kind</th><th>Coverage</th></tr></thead>
+    <tbody>
+      <tr><td>Single-package libraries (bitset, priorityqueue, workerpool…)</td><td>90–100%</td></tr>
+      <tr><td>tasks-api / workapi</td><td>57% / 60%</td></tr>
+      <tr><td><strong>taskapi / taskapipro</strong></td><td><strong>24% / 30%</strong></td></tr>
+    </tbody>
+  </table>
+  <p>
+    The suite's biggest projects are green while running a <em>quarter</em> of their
+    own code. Two gaps account for most of it. The <code>models</code> package — where
+    the domain rules live, <code>Task.Validate</code> and <code>Project.Validate</code>,
+    the checks every other package trusts — had <strong>no test file at all</strong>,
+    in any of the three multi-package specs. And the store packages measured exactly
+    50.9%, which is not a coincidence: the store declares eight methods, four for Task
+    and four for Project, mirrored — and the tests called only the Task four. Half the
+    store had never been run, and the mirrored half is precisely where a copy-paste
+    slip hides.
+  </p>
+  <p>
+    Both are now specified. But the near-miss while writing them is the whole risk of
+    this frontier in one line: workapi's <code>models</code> package has Task and
+    <em>Event</em>, not Project. Asking it for a <code>TestProjectValidate</code> would
+    have written a test against a type that does not exist, broken the build, and
+    <em>lowered the green rate in the name of raising coverage</em>. So the next sweep
+    measures both numbers. A coverage gain paid for with a green loss is not a gain.
+  </p>
+
+  <p class="report__result">
+    The pattern this week has been one thing wearing many hats: mechanisms that look
+    like they work. A harness deleting its evidence, an error surface hiding the bug
+    from the gate written to fix it, a best-of-N that never selected, gates corrupting
+    the files they repaired — and now three gates that were never told their bug had
+    happened. Not one of them was a model limitation. Every one of them was invisible
+    until something counted. The Builder's suite stands at <strong>290 tests</strong>,
+    the model has not changed since April, and the bill is still $0.
+  </p>
+
+  <div class="report__meta">
+    All training, serving, benchmarking and Builder runs are local on an M1 Max
+    with Apple MLX — total cloud spend: $0. The gates, the go/ast rewriters, the
+    audit, the archive and the Builder loop:
+    <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
+  </div>
+</article>
+</body>
+</html>
