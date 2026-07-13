@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #22 — Four bugs under a green suite · GuildLM Research</title>
+<meta name="description" content="Coverage is not a metric. It is a bug detector. Chasing uncovered blocks across ten backends turned up a panic that takes the server down, a validator that never trimmed, a validator that was never called at all, and an endpoint that was never registered — half an API, unreachable, under a suite that had been green for a week. Every one of them was hiding in a branch the spec never named.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #22 · 2026-07-14</div>
+  <h1>Four bugs under a green suite</h1>
+  <p class="report__lede">
+    The last report closed with two gates and a coverage number. This one is about
+    what the coverage number was <em>for</em>. Chasing uncovered blocks across ten
+    Go backends turned up a panic that takes the server down, a validator that never
+    trimmed, a validator that was never called at all, and an endpoint that was never
+    registered — half an API, unreachable, under a suite that had been green for a
+    week. Coverage is not a metric. It is a bug detector, and everything it found was
+    hiding in the same place: a branch the spec never named.
+  </p>
+
+  <h2>The law that predicted all four</h2>
+  <p>
+    Yesterday's report established it and today it held nine times out of nine:
+  </p>
+  <blockquote>
+    Coverage is a mirror of the spec's list of test names. The model writes every
+    test that is named and not one that is not. The hole is exactly the shape of what
+    the spec forgot to say.
+  </blockquote>
+  <p>
+    Which makes it <em>predictive</em>. Before measuring taskflow I could say where
+    the hole would be: the spec named one project test, so the project half would be
+    dark. It was. And in every dark branch, something was waiting.
+  </p>
+
+  <h2>1. A panic, reachable from any HTTP request</h2>
+  <p>
+    The <code>service</code> package sat at 48.6%. I pulled the uncovered blocks and
+    wrote the test the spec had implied — <em>"bounds checks, never panics"</em> — and
+    it crashed:
+  </p>
+<pre>panic: runtime error: slice bounds out of range [-1:]</pre>
+  <p>
+    <code>paginate</code> had no <code>offset &lt; 0</code> clamp. Any request carrying
+    <code>?offset=-1</code> slices <code>items[-1:]</code> and takes the process down.
+    <strong>The spec itself said "never panic."</strong> The model had written that
+    guard correctly in one run and dropped it in another — in three backends, all
+    three shipped without it, all three green.
+  </p>
+  <blockquote>
+    An untested branch is not merely unverified. It is a branch where the model's
+    output is a coin flip — and the coin has been flipping in production.
+  </blockquote>
+
+  <h2>2. A validator that never trimmed</h2>
+  <p>
+    tasks-api was the suite's lowest at 56.5%. <code>Validate()</code> — the contract
+    every other layer trusts — had never been executed <em>directly</em>. Writing the
+    test the spec implied:
+  </p>
+<pre>func (t Task) Validate() error {
+        if t.Title == "" {              <span class="report__code-note">// the spec says: "when the TRIMMED Title is empty"</span></pre>
+  <p>
+    A title of <code>"   "</code> was accepted. The API stored tasks that look blank to
+    every client. The spec was right; the code was wrong; nothing ever asked.
+  </p>
+
+  <h2>3. A validator that was never called</h2>
+  <p>
+    The same file, one layer up. <code>PUT /tasks/{id}</code> was registered, shipped,
+    and had <em>never been called once</em> — so nobody had noticed that
+    <code>Update</code> does not validate. Nor does <code>Create</code>.
+    <code>Validate()</code> was dead code.
+  </p>
+  <p>
+    The spec said <em>"map ErrInvalidTask to 400 with errors.Is"</em> — and the model
+    wrote that mapping faithfully, while never calling the one thing that produces the
+    error.
+  </p>
+  <blockquote>
+    Mapping an error that nothing returns is a dead branch. And an uncalled method is
+    legal Go: it builds, it vets, and there is no sentence for a gate to hear. The only
+    thing that notices is a test.
+  </blockquote>
+
+  <h2>4. And the quiet one: a door that was never there</h2>
+  <p>
+    taskflow's router wired three project endpoints:
+  </p>
+<pre>mux.HandleFunc("GET /projects", projectHandler.List)
+mux.HandleFunc("GET /projects/{id}", projectHandler.Get)
+mux.HandleFunc("DELETE /projects/{id}", projectHandler.Delete)
+<span class="report__code-note">// and no POST /projects.</span></pre>
+  <p>
+    A project could never be created. Every project endpoint answered 405. <strong>Half
+    the API was unreachable</strong> — and the suite was green, because no test had ever
+    tried to create a project. The spec said <code>POST/GET /projects</code>. The model
+    dropped the POST.
+  </p>
+  <blockquote>
+    The mirror law at its most expensive: an untested mirror can be missing more than
+    its branches. It can be missing its door.
+  </blockquote>
+
+  <h2>What actually fixes these</h2>
+  <p>
+    Not a gate. Three of the four are invisible to the compiler — an unregistered route,
+    an uncalled method, a missing clamp all build clean and vet clean. There is no
+    sentence for a gate to listen for. What fixes them is the spec, and specifically two
+    devices that earned their keep today:
+  </p>
+  <p>
+    <strong>Show, don't describe.</strong> "Bounds checks, never panics" produced a
+    panic. Three named guards written out as code produced the guards, in three
+    backends out of three. "Map ErrInvalidTask to 400" produced a mapping with nothing
+    behind it; <code>if err := t.Validate(); err != nil</code>, written out, produced
+    the call.
+  </p>
+  <p>
+    <strong>Make it countable.</strong> The model drops what it cannot count. "Nine
+    routes, and the one that goes missing is POST /projects" produced nine routes.
+    "THREE declarations, count them" stopped an <code>Event</code> struct from
+    vanishing. "Eleven top-level declarations: the helper and ten tests" stopped the
+    helper from vanishing. Three for three.
+  </p>
+
+  <h2>The honest floor</h2>
+  <p>
+    The gate audit reported one artifact <em>stuck</em> — the gates could not move it at
+    all — and for a moment that reads as a broken gate chain. It was not. The artifact's
+    defect is the missing route, and a missing route is legal Go. So the audit now says
+    what STUCK actually means, because it was three different things wearing one label:
+  </p>
+<pre>a gate that stopped firing         → a REGRESSION      (fix it)
+a defect class never seen          → a BACKLOG item    (build it)
+a defect the compiler cannot name  → the HONEST FLOOR  (leave it)</pre>
+  <p>
+    The third is real, and it is not a failure. It is the boundary between what
+    determinism can repair and what only a specification can prevent.
+  </p>
+
+  <h2>Numbers</h2>
+<pre>service   workapi      54.2%  →  100.0%
+service   taskapipro   48.6%  →   94.3%
+api       taskapi      64.6%  →   93.0%
+api       taskapipro   64.5%  →   86.4%
+          taskflow     65.7%  →   79.7%     <span class="report__code-note">// projects List 0% → 100%, Delete 0% → 85.7%</span>
+          tasks-api    56.5%  →   70.6%     <span class="report__code-note">// Validate 0% → 100%, Update 0% → 72.2%</span>
+
+10 / 10 specs green.  Nothing traded for it.
+green by the gates alone, no model:  10.   suite: 290.</pre>
+
+  <p class="report__result">
+    "Green" means the tests that exist pass. It does not mean the code that exists
+    works — and which tests exist is decided by the spec's list of names. That is the
+    whole of it. Four bugs shipped under a green suite, and every one of them was
+    sitting in a branch nobody had thought to name: an unnamed guard, an unnamed rule,
+    an unnamed call, an unnamed route. Coverage did not measure the work. It found the
+    work.
+  </p>
+
+  <div class="report__meta">
+    All training, serving, benchmarking and Builder runs are local on an M1 Max
+    with Apple MLX — total cloud spend: $0. The gates, the go/ast rewriters, the
+    audit, the archive and the Builder loop:
+    <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
+  </div>
+</article>
+</body>
+</html>

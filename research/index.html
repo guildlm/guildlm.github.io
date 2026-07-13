@@ -34,6 +34,20 @@
     said (wins <em>and</em> losses). All runs are local, $0, and reproducible.
   </p>
 
+  <a class="logentry" href="2026-07-14-four-bugs-under-a-green-suite.html">
+    <div class="logentry__date">2026-07-14 · Report #22</div>
+    <div class="logentry__title">Four bugs under a green suite</div>
+    <div class="logentry__desc">
+      Coverage is not a metric. It is a bug detector. Chasing uncovered blocks across ten Go backends
+      turned up a <code>paginate</code> that panics on any <code>?offset=-1</code> and takes the server
+      down; a validator that never trimmed, so a title of three spaces was accepted; a validator that was
+      never <em>called</em> — not by Create, not by Update, dead code behind a status-code mapping with
+      nothing to map; and a router missing <code>POST /projects</code>, so a project could never be
+      created and half the API answered 405. All four shipped. All four sat under a suite that had been
+      green for a week. And all four were hiding in the same place: a branch the spec never named.
+    </div>
+  </a>
+
   <a class="logentry" href="2026-07-13-what-the-spec-does-not-say.html">
     <div class="logentry__date">2026-07-13 · Report #21</div>
     <div class="logentry__title">Everything the spec does not say, the model says for you</div>
