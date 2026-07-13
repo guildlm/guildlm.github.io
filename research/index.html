@@ -34,6 +34,22 @@
     said (wins <em>and</em> losses). All runs are local, $0, and reproducible.
   </p>
 
+  <a class="logentry" href="2026-07-13-what-the-spec-does-not-say.html">
+    <div class="logentry__date">2026-07-13 · Report #21</div>
+    <div class="logentry__title">Everything the spec does not say, the model says for you</div>
+    <div class="logentry__desc">
+      I went in to raise coverage in one package. I came out with a live runtime panic that had been
+      shipping green for a week — <code>paginate</code> had no negative-offset clamp, so any request with
+      <code>?offset=-1</code> took the process down, and the spec itself said "never panic". The model had
+      written that guard correctly in one run and dropped it in another, and nothing noticed, because
+      nothing ever asked. Then three distinct ways a passing test can be a lie, all of them from the spec:
+      an assertion that cannot fail, one that cannot run, and one that was never asked for. And a fix loop
+      that had spent a week throwing away half of every default this project ever wrote. Six escalating
+      versions of a prompt rule could not stop one bug. Two go/ast gates did — and the deterministic layer
+      doubled, from 5 red projects driven to green with no model involved, to 10.
+    </div>
+  </a>
+
   <a class="logentry" href="2026-07-12-the-tests-were-wrong.html">
     <div class="logentry__date">2026-07-12 · Report #20</div>
     <div class="logentry__title">The tests were wrong. So was the ruler.</div>

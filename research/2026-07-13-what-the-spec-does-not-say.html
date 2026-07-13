@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #21 — Everything the spec does not say, the model says for you · GuildLM Research</title>
+<meta name="description" content="I went in to raise coverage in one package. I came out with a live runtime panic that had been shipping green for a week, three distinct ways a passing test can be a lie, and a fix loop that had spent a week throwing away half of every default this project ever wrote. Six escalating versions of a prompt rule could not stop one bug. Two go/ast gates did — and the deterministic layer doubled.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #21 · 2026-07-13</div>
+  <h1>Everything the spec does not say, the model says for you</h1>
+  <p class="report__lede">
+    I set out to raise coverage in one package. What I found was a live runtime panic
+    in code that had been shipping green for a week, three distinct ways a passing test
+    can be a lie, and a fix loop that had spent a week throwing away half of every
+    default this project ever wrote. Ten reds today. Nine were upstream of the model.
+    The tenth was an honest model limit — and it took two <code>go/ast</code> gates to
+    close, because six escalating versions of a prompt rule could not.
+  </p>
+
+  <h2>The money shot: coverage was not a vanity metric</h2>
+  <p>
+    The <code>service</code> package sat at 48.6% and 54.2%. I pulled the uncovered
+    blocks out of the coverprofile and wrote the tests the spec had <em>implied but
+    never named</em>. One of them crashed:
+  </p>
+<pre>panic: runtime error: slice bounds out of range [-1:]</pre>
+  <p>
+    <code>paginate</code> had no <code>offset &lt; 0</code> clamp. Any HTTP request
+    carrying <code>?offset=-1</code> slices <code>items[-1:]</code> and takes the
+    process down. <strong>The spec itself said "never panic."</strong>
+  </p>
+  <p>
+    The bug is not the sharp part. The sharp part is that the model wrote that guard
+    <em>correctly</em> in one run and dropped it in another. Nothing noticed, because
+    nothing ever asked. Same branch, same purpose, three backends: guard present in
+    one, absent in two, tested in none. All three shipped green.
+  </p>
+  <blockquote>
+    An untested branch is not merely unverified. It is a branch where the model's
+    output is a coin flip — and the coin has been flipping in production.
+  </blockquote>
+
+  <h2>Three ways a passing test can be a lie</h2>
+  <p>All three came from the spec, not the model.</p>
+
+  <h3>1. An assertion that cannot fail</h3>
+  <p>
+    The spec said: <em>"List with limit=1 → <strong>at most</strong> 1 item."</em> The
+    model faithfully wrote the check. A <code>paginate</code> that returns
+    <em>nothing at all</em> satisfies it. I proved it by mutation — broke
+    <code>paginate</code> to return an empty slice, and:
+  </p>
+<pre>if len(got) &gt; limit { Errorf(...) }   <span class="report__code-note">// "at most 1" — SILENT. Passes.</span>
+if len(got) != limit { Errorf(...) }  <span class="report__code-note">// "exactly 1" — catches it instantly.</span></pre>
+
+  <h3>2. An assertion that cannot run</h3>
+  <p>
+    In a test that <em>expects</em> an error, the model opened with the file's dominant
+    rhythm — and then wrote the assertion the spec asked for <em>underneath</em> it:
+  </p>
+<pre>_, err := svc.List(ctx, 1, 0, "")
+if err != nil {
+        t.Fatalf("List: %v", err)      <span class="report__code-note">// fires on the very error we asked for</span>
+}
+if !errors.Is(err, errBoom) {          <span class="report__code-note">// DEAD CODE. Never runs.</span>
+        t.Fatalf("want errBoom, got %v", err)
+}</pre>
+  <p>
+    It did not fail to understand the ask. It <em>added</em> the habit on top of it. In
+    the function directly above, it got the same thing right — a rhythm, not a rule.
+  </p>
+
+  <h3>3. An assertion that was never asked for</h3>
+  <p>
+    The spec said <code>TestHealthz: GET /healthz -&gt; 200.</code> The model wrote the
+    status check, then invented a second one: it decoded the body into
+    <code>struct{ Status string }</code> and asserted <code>Status == "ok"</code>. The
+    handler writes the bare JSON string <code>"ok"</code>. The struct decode silently
+    yields the zero value, and the test fails <strong>against a handler that is working
+    correctly</strong>.
+  </p>
+  <p>
+    And then the part that should worry anyone running a repair loop: left alive, that
+    invented assertion started rewriting the <em>product</em>. The machinery's next move
+    was <code>widening fix targets to package impl</code> — it was about to bend the
+    handler to satisfy a test nobody had specified.
+  </p>
+
+  <h2>The controlled evidence</h2>
+  <p>
+    In the <em>same run</em>, in the <em>same file family</em>: the two tests where I had
+    written <strong>"and NOTHING ELSE"</strong> came out clean. The one test where I had
+    not, the model filled the silence — and failed.
+  </p>
+  <blockquote>
+    "One test, one outcome" is not enough. You must also say <em>and nothing else</em>.
+    Otherwise the model fills the silence — with a habit, or with an invention.
+  </blockquote>
+
+  <h2>Mechanism #12: the fixer never saw the defaults</h2>
+  <p>
+    Chasing why a bug I had already written a default for kept coming back, I found it.
+    <code>test_rule</code> — every test-authoring rule this project has built over a
+    week: HTTP hygiene, isolate-state, one-test-one-outcome, struct literals, the
+    shadowed <code>t</code> — was used in <code>_generate_prompt</code> and
+    <strong>nowhere else</strong>. It was not in <code>_fix_prompt</code>.
+  </p>
+  <p>
+    The generator got the rules. The fixer did not. And a fix round <em>rewrites the
+    whole file</em> — so every fix round rewrote a test file blind to every default the
+    project had ever built, and regressed to the exact prior each one exists to prevent.
+    Half the investment, thrown away one round at a time.
+  </p>
+  <p>
+    It compounds with mechanism #11, found the same day: the fix prompt embeds
+    <code>task.spec.purpose</code> verbatim. So when the purpose is what produced the
+    wrong code, the loop hands that same purpose back as the instruction for
+    <em>repairing</em> it. Five rounds of "fixing" are five re-readings of the same bad
+    sentence. In the log it reads as a model that is struggling. It is a spec that is
+    winning.
+  </p>
+  <blockquote>
+    Both repair layers are helpless against a spec bug. The gates cannot even hear a
+    parse error — a file that does not parse never reaches the type checker, and the
+    <code>go/ast</code> gates need the tree that does not exist. And the model is handed
+    the bug back, every round, in the prompt meant to fix it.
+  </blockquote>
+
+  <h2>A nudge is not a gate</h2>
+  <p>
+    The drained-body bug — a request built once and served twice, so the second call
+    sends an empty body and a "POST twice → 409" case reports <code>want 409, got
+    400</code> against a handler that is perfectly correct — survived
+    <strong>six escalating versions</strong> of its prompt default. The rule names the
+    variable. It forbids the reuse. It explains the drain. It predicts the exact status
+    code. It quotes the wrong code verbatim as <em>"exactly the bug"</em>. It anchors
+    the example to the duplicate test by name.
+  </p>
+  <p>
+    I checked that the rule reaches the prompt. I checked that the retrieval corpus does
+    not teach it. The model writes it anyway — because the duplicate case is the
+    <em>one</em> test in which both requests are a POST of the same body to the same
+    URL, and that identity is exactly what makes reusing <code>req</code> look correct.
+  </p>
+  <p>
+    That is a nudge-resistant defect, and <a href="2026-07-10-a-nudge-is-not-a-gate.html">Report #14</a>
+    already named the answer. Two gates followed — both <code>go/ast</code>, both
+    <strong>structural rather than error-driven</strong>, and that is the interesting
+    part. The failures surface as <code>want 409, got 400</code> and <code>List:
+    boom</code>: messages the <em>spec</em> wrote, not the compiler. There is no sentence
+    for a gate to listen for. So each keys instead on an <strong>unconditional
+    contradiction in the source</strong>:
+  </p>
+  <ul>
+    <li>a body-bearing request reaching <code>ServeHTTP</code> twice with no reassignment
+      between is <em>always</em> a drained body;</li>
+    <li>a test cannot both demand that <code>err</code> be nil and assert what
+      <code>err</code> wraps.</li>
+  </ul>
+  <p>
+    Whichever way you read those, the code is wrong. That is what makes the repair safe
+    without the compiler's help. And the repair has to be careful in a way the first
+    draft was not: rebuilding the request naively drops
+    <code>req.Header.Set("Authorization", …)</code>, so the "fixed" test fails 401
+    instead of 400 — one silent breakage traded for another. It replays the mutations.
+  </p>
+
+  <h2>The criterion for building a gate was wrong</h2>
+  <p>
+    The model wrote <code>w.count.Inc()</code> on a <code>sync/atomic.Int64</code>, which
+    has no such method. The compiler named the type, the method, the file and the line —
+    every round. The model rewrote it <strong>five times</strong>, in a file where it
+    used <code>w.count.Load()</code> correctly two lines below. The project went red on
+    one line, and the entire fix budget was spent on it.
+  </p>
+  <p>By frequency (n ≥ 2 across projects), that gate was not worth building.</p>
+  <blockquote>
+    A gate's value is not how <em>often</em> the error occurs. It is whether the model
+    can fix it once the compiler has <em>named</em> it. An error re-committed after being
+    told is deterministic-layer work by definition — even at n=1.
+  </blockquote>
+
+  <h2>Numbers</h2>
+  <p>
+    The deterministic layer, measured on the archive of red artifacts — projects it drives
+    to green <em>with no model involved</em>:
+  </p>
+<pre>a week ago       0
+this morning     5
+tonight         10        <span class="report__code-note">// 0 stuck. Suite 290 green.</span></pre>
+  <p>Coverage, after the fronts closed. Green was never traded for it — every number below is from a run that passed build, vet and test-race:</p>
+<pre>service   workapi      54.2%  →  100.0%
+service   taskapipro   48.6%  →   94.3%
+api       taskapi      64.6%  →   93.0%
+Recover   usersapi     66.7%  →  100.0%     <span class="report__code-note">// 5 specs declared it. 0 tested it.</span>
+Recover   taskflow     66.7%  →  100.0%
+paginate  taskflow     80.0%  →  100.0%     <span class="report__code-note">// the panic, closed</span>
+
+10 / 10 specs green.</pre>
+  <p>
+    The mandatory regression sweep that gated the global default change did exactly what
+    it exists for: <strong>five specs I had not touched, five green.</strong> Three came
+    back red — and all three were pre-existing spec gaps the sweep made visible for the
+    first time. Not one was a regression.
+  </p>
+
+  <h2>Write the answer to your own spec first — and its limit</h2>
+  <p>
+    Four times today my spec was wrong, and each time I learned it only after a
+    40-minute GPU run. So: copy the artifact, write the test file <em>yourself</em>, run
+    <code>go test -cover</code>. Thirty seconds, no GPU. If you cannot write it, the
+    model cannot. If it compiles and moves the number you predicted, the ask is proven.
+  </p>
+  <p>It paid immediately — my own reference implementation showed me, twice, that my "fixed" spec was <em>still</em> incomplete. But it has a limit, and the dead-assertion bug is exactly it:</p>
+  <blockquote>
+    Writing the answer yourself proves the ask is SATISFIABLE. It does not prove the ask
+    is UNAMBIGUOUS. My reference implementation passed precisely because I did not happen
+    to have the model's habit.
+  </blockquote>
+
+  <p class="report__result">
+    Yesterday's lesson was that a default is only as good as the <em>name</em> the model
+    moves over. Today it completed itself twice more: an example is only as good as the
+    <em>scope</em> it pins, and only as good as the <em>case</em> it is anchored to. The
+    model read every rule, understood it, and applied its shape to the wrong place —
+    because a shape that fits somewhere else will land somewhere else. None of that is a
+    model limit. What <em>is</em> a model limit gets a gate, and the gate is not a
+    louder sentence: it is a contradiction in the source that no reading can rescue.
+  </p>
+
+  <h2>Postscript — the ruler lied eight times</h2>
+  <p>Every finding above survived a second measurement. Eight did not:</p>
+  <ul>
+    <li>a defect looked <em>rare</em> because it was missing from logs that had never
+      printed error output at all — until I added it thirty minutes earlier. <em>A signal
+      absent from records that never recorded it is not rare; it is newly visible.</em></li>
+    <li>a loose regex turned valid method values into five phantom bugs, and nearly turned
+      n=1 into n=5 — I was one keystroke from publishing "the corpus teaches the bug."</li>
+    <li>a spec check flagged <code>&lt;= 1</code> — inside the sentence I had written
+      <em>warning against</em> <code>&lt;= 1</code>.</li>
+    <li><code>go build … | head &amp;&amp; echo PROVEN</code> printed PROVEN while the
+      build was failing, because <code>&amp;&amp;</code> reads <code>head</code>'s exit
+      code. The shell's own version of an oracle that cannot fail — in the script
+      verifying a gate written to catch oracles that cannot fail.</li>
+  </ul>
+  <p>
+    A number is not true because it looks plausible. It is true when it could not have
+    been anything else.
+  </p>
+
+  <div class="report__meta">
+    All training, serving, benchmarking and Builder runs are local on an M1 Max
+    with Apple MLX — total cloud spend: $0. The gates, the go/ast rewriters, the
+    audit, the archive and the Builder loop:
+    <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
+  </div>
+</article>
+</body>
+</html>
