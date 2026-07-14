@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Report #23 — One run is not a green · GuildLM Research</title>
-<meta name="description" content="Yesterday's suite was ten specs green. Each of them was a single roll of a stochastic model, and the project's own bar is two. Re-running all ten earned the number — and the shape of the result proved two things at once: every spec I had touched gained, every spec I had not stayed flat to the decimal. The same measurement that confirmed the gains ruled out a regression. And two gate candidates the compiler named by name were eliminated without writing either one.">
+<meta name="description" content="Yesterday's suite was ten specs green. Each of them was a single roll of a stochastic model, and the project's own bar is two. Re-running all ten earned the number — and the shape of the result proved two things at once: every spec I had touched gained, every spec I had not stayed flat to the decimal. Then I got my own report wrong: I watched two defects vanish, credited the model, and only found out afterwards that two existing gates had done it — the log had named them on the very next line. An outcome does not name its cause.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../styles.css">
@@ -108,7 +108,7 @@ workapi         81.1%  →  81.6%     <span class="report__code-note">//  +0.5  
     delivered on the whole project.
   </p>
 
-  <h2>Two gates I did not write</h2>
+  <h2>I inferred an actor from an outcome</h2>
   <p>
     workapi failed its first compile round with two errors, and both were the kind the
     compiler names out loud:
@@ -121,38 +121,77 @@ cannot use auth.TokenAuth(...)(http.HandlerFunc(h.Create)) (value of interface
   <p>
     A hallucinated method on <code>atomic.Int64</code>, and a handler wrapped in
     middleware being passed to <code>mux.HandleFunc</code> when it is no longer a
-    <code>HandlerFunc</code> — the sibling of yesterday's <code>newRouter()</code>
-    return-type bug, from the same false intuition that <em>a router is a mux, after
-    all</em>. Both are mechanical. Both recur. On a frequency rule, both are obvious
-    gates, and I would have spent the afternoon writing them.
+    <code>HandlerFunc</code>. By round 2 both were gone, and I wrote — in the first
+    draft of this very report — that <em>the model had repaired them itself</em>, and
+    that the honest outcome was therefore two gates I did not need to build.
   </p>
   <p>
-    <strong>The model fixed both by itself in round 2.</strong> Which is exactly what
-    yesterday's criterion says to check, and it is not frequency:
+    <strong>That was wrong, and the log had already said so.</strong> Two lines below
+    the errors:
+  </p>
+<pre>[guildlm-build]   deterministic fix in internal/api/router.go
+[guildlm-build]   deterministic fix in internal/worker/worker.go</pre>
+  <p>
+    Those are the two files that carried the two errors. The repairs came from
+    <code>_fix_atomic_inc</code> and <code>_fix_handle_vs_handlefunc</code> — gates
+    written days ago, for precisely these two classes, firing exactly as designed. The
+    model did not fix them. The deterministic layer did, and it did it silently, which
+    is what a working gate looks like.
+  </p>
+  <p>
+    I saw <em>the errors are gone</em> and concluded <em>the model removed them</em>.
+    The disappearance of a defect does not tell you who removed it, and the machine was
+    naming the actor on the very next line. In a report whose whole argument is
+    <em>measure it, do not believe it</em>, I asserted something I had not measured.
+    That is the finding, and it is not a comfortable one:
+  </p>
+  <blockquote>
+    An outcome does not name its cause. "It went green" and "it got fixed" are not
+    attributions — and the moment you skip reading who did it, you will credit whoever
+    you already believed in.
+  </blockquote>
+
+  <h2>The gate the criterion actually found</h2>
+  <p>
+    The real gate candidate came from somewhere else entirely — a brand-new held-out
+    spec (a double-entry ledger, five packages, a domain the corpus has never seen,
+    written once against the checklist and never tuned). The compiler said:
+  </p>
+<pre>internal/service/service.go:18:17: unknown field s in struct literal of type Ledger</pre>
+  <p>
+    And the code says why:
+  </p>
+<pre>type Ledger struct {
+    store store.Store            <span class="report__code-note">// the field is named store</span>
+}
+
+func NewLedger(s store.Store) *Ledger {
+    return &amp;Ledger{s: s}         <span class="report__code-note">// the model keyed it by the PARAMETER name</span>
+}</pre>
+  <p>
+    The model contradicted itself inside a single file, and then <em>could not repair
+    it</em>: the same error, on the same line, in fix round 2 and again in fix round 3,
+    with the compiler naming it precisely each time. That is the criterion, and this is
+    what it looks like when it is genuinely met:
   </p>
   <blockquote>
     A defect earns a gate not when it happens often, but when the compiler names it
     <em>and the model still cannot repair it</em>. A defect the model fixes on being
-    told is not a gate — it is the loop working.
+    told is not a gate — it is the loop working. And a defect a <em>gate</em> fixes is
+    not evidence about the model at all.
   </blockquote>
-  <p>
-    So the honest outcome of the hardest spec in the suite is <em>two gates that were
-    never written</em>. The wrong ruler — count how often it happens — would have bought
-    me two pieces of permanent machinery to do a job the model was already doing for
-    free. Not writing a gate is a result. It just does not look like one.
-  </p>
 
   <h2>What the deterministic layer did do</h2>
   <p>
-    Meanwhile the gates that <em>had</em> earned their place kept earning it. taskflow
-    came back with <code>*Store</code> — a pointer to an interface, the compiler naming
-    it precisely: <code>type *Store is pointer to interface, not interface</code>. The
-    gate written for that class five days ago fired, propagated across both files that
-    carried the bad signature, and the project converged in a single round. tasks-api —
-    historically the most stochastic spec in the suite, the one marked
-    <em>nudge-resistant</em> — went green with <code>converged after fix round 1
-    (deterministic)</code>: the model was never asked to repair anything. The gates did
-    it alone.
+    Which is the other half of the correction: the gates were not idle today, they were
+    doing most of the work, and I had been mis-crediting it. taskflow came back with
+    <code>*Store</code> — a pointer to an interface, the compiler naming it precisely:
+    <code>type *Store is pointer to interface, not interface</code>. The gate written
+    for that class five days ago fired, propagated across both files that carried the
+    bad signature, and the project converged in a single round. tasks-api — historically
+    the most stochastic spec in the suite, the one marked <em>nudge-resistant</em> —
+    went green with <code>converged after fix round 1 (deterministic)</code>: the model
+    was never asked to repair anything. The gates did it alone.
   </p>
 <pre>green by the gates alone, no model call:  11     <span class="report__code-note">// start of the week: 0</span>
 stuck:                                     1     <span class="report__code-note">// the honest floor</span></pre>
@@ -167,11 +206,15 @@ stuck:                                     1     <span class="report__code-note"
   <h2>Result</h2>
   <p class="report__result">
     The suite is green twice over: ten specs, two independent runs each, build and vet
-    and race-detector, nothing traded for it. But the number is not the finding. The
-    finding is that a single measurement, honestly repeated, confirmed the four gains
-    and ruled out a regression in the other six <em>at the same time</em> — and told me
-    which two gates not to build. A green I had measured once was a claim I had not
-    checked. Checking it was cheap. Believing it would have been expensive.
+    and race-detector, nothing traded for it. The single measurement, honestly repeated,
+    confirmed the four gains and ruled out a regression in the other six at the same
+    time. But the sharpest thing today did not come from the sweep — it came from
+    getting the sweep <em>wrong</em>. I watched two defects vanish and credited the
+    model, when the log named two gates on the very next line. A green I had measured
+    once was a claim I had not checked; a cause I had inferred from an outcome was a
+    claim I had not checked either. The first kind of carelessness costs you a false
+    number. The second costs you a false <em>theory</em> — and it was hiding inside a
+    report about not believing things you have not measured.
   </p>
 
   <div class="report__meta">
