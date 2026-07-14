@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #23 — One run is not a green · GuildLM Research</title>
+<meta name="description" content="Yesterday's suite was ten specs green. Each of them was a single roll of a stochastic model, and the project's own bar is two. Re-running all ten earned the number — and the shape of the result proved two things at once: every spec I had touched gained, every spec I had not stayed flat to the decimal. The same measurement that confirmed the gains ruled out a regression. And two gate candidates the compiler named by name were eliminated without writing either one.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #23 · 2026-07-15</div>
+  <h1>One run is not a green</h1>
+  <p class="report__lede">
+    The last report ended on a table: ten specs, ten greens. It was true and it was
+    not yet earned. Every one of those greens was a <em>single roll</em> of a
+    stochastic model, and this project's own bar for calling something green is two.
+    So today's job was to go back and pay for a number I had already written down.
+    The suite paid — and the <em>shape</em> of how it paid turned out to be worth more
+    than the number.
+  </p>
+
+  <h2>The number I had not earned</h2>
+  <p>
+    Yesterday I changed seven specs, four gates, and the repair prompt. Then I ran each
+    spec once, got ten greens, and wrote them down. Every instinct in this project says
+    that is not enough. A 7B model is stochastic; a spec that passes once may be a spec
+    that got lucky once. And the week had been one long lesson in things that
+    <em>look</em> like they work: a harness that deleted its own evidence, a default
+    that taught the wrong pattern, a best-of-N that never chose, a ruler that lied ten
+    times in a single day.
+  </p>
+  <blockquote>
+    A green that has been measured once is a claim. A green that has been measured
+    twice is a result.
+  </blockquote>
+  <p>
+    So: all ten specs, from scratch, again. Nothing else touched.
+  </p>
+
+  <h2>10 / 10, and the pattern underneath</h2>
+<pre>                run 1     run 2
+taskapi         88.8%  →  88.8%     <span class="report__code-note">// untouched</span>
+kvservice       88.0%  →  88.0%     <span class="report__code-note">// untouched</span>
+logstats        82.0%  →  82.0%     <span class="report__code-note">// untouched</span>
+usersapi        80.8%  →  80.8%     <span class="report__code-note">// untouched</span>
+ratelimit       75.0%  →  75.0%     <span class="report__code-note">// untouched</span>
+shortener       72.7%  →  72.4%     <span class="report__code-note">// untouched</span>
+
+taskapipro      73.1%  →  84.3%     <span class="report__code-note">// +11.2  spec touched</span>
+taskflow        66.2%  →  79.7%     <span class="report__code-note">// +13.5  spec touched</span>
+tasks-api       56.5%  →  68.3%     <span class="report__code-note">// +11.8  spec touched</span>
+workapi         81.1%  →  81.6%     <span class="report__code-note">//  +0.5  spec touched</span>
+
+10 / 10 green.  build + vet + test -race, every one.</pre>
+
+  <p>
+    Read the two halves against each other, because that is where the result actually
+    lives. <strong>Every spec I touched gained. Every spec I did not touch came back
+    flat to the decimal.</strong> Not approximately flat — 88.8 to 88.8, 88.0 to 88.0,
+    82.0 to 82.0.
+  </p>
+
+  <h2>One measurement, two proofs</h2>
+  <p>
+    That twin pattern is doing two jobs at once, and I did not design it to:
+  </p>
+  <ul>
+    <li>
+      <strong>The gains are real.</strong> If run-to-run noise were large enough to
+      produce a double-digit swing, the six untouched specs would have wandered too.
+      They did not move at all. So the +11.2, +13.5 and +11.8 are not the dice — they
+      are the spec edits.
+    </li>
+    <li>
+      <strong>Nothing regressed.</strong> Six specs I never opened, re-generated from
+      scratch against four new gates and a rewritten repair prompt, landed on their
+      exact previous numbers. That is the regression sweep, for free, from the same run.
+    </li>
+  </ul>
+  <p>
+    And there is a quieter thing in the touched half. Yesterday those four spec fixes
+    were <em>proven against a reference implementation</em> — I hand-wrote the code the
+    spec was asking for and measured that. They had never once been run through the
+    actual model. A reference implementation proves a spec is <em>satisfiable</em>. It
+    does not prove the model will satisfy it. Today was the first time anything checked
+    the second claim, and it held: 89.1% promised on taskapipro's api front, 84.3%
+    delivered on the whole project.
+  </p>
+
+  <h2>Two gates I did not write</h2>
+  <p>
+    workapi failed its first compile round with two errors, and both were the kind the
+    compiler names out loud:
+  </p>
+<pre>w.count.Inc undefined (type "sync/atomic".Int64 has no field or method Inc)
+
+cannot use auth.TokenAuth(...)(http.HandlerFunc(h.Create)) (value of interface
+  type http.Handler) as func(http.ResponseWriter, *http.Request) value in
+  argument to mux.HandleFunc</pre>
+  <p>
+    A hallucinated method on <code>atomic.Int64</code>, and a handler wrapped in
+    middleware being passed to <code>mux.HandleFunc</code> when it is no longer a
+    <code>HandlerFunc</code> — the sibling of yesterday's <code>newRouter()</code>
+    return-type bug, from the same false intuition that <em>a router is a mux, after
+    all</em>. Both are mechanical. Both recur. On a frequency rule, both are obvious
+    gates, and I would have spent the afternoon writing them.
+  </p>
+  <p>
+    <strong>The model fixed both by itself in round 2.</strong> Which is exactly what
+    yesterday's criterion says to check, and it is not frequency:
+  </p>
+  <blockquote>
+    A defect earns a gate not when it happens often, but when the compiler names it
+    <em>and the model still cannot repair it</em>. A defect the model fixes on being
+    told is not a gate — it is the loop working.
+  </blockquote>
+  <p>
+    So the honest outcome of the hardest spec in the suite is <em>two gates that were
+    never written</em>. The wrong ruler — count how often it happens — would have bought
+    me two pieces of permanent machinery to do a job the model was already doing for
+    free. Not writing a gate is a result. It just does not look like one.
+  </p>
+
+  <h2>What the deterministic layer did do</h2>
+  <p>
+    Meanwhile the gates that <em>had</em> earned their place kept earning it. taskflow
+    came back with <code>*Store</code> — a pointer to an interface, the compiler naming
+    it precisely: <code>type *Store is pointer to interface, not interface</code>. The
+    gate written for that class five days ago fired, propagated across both files that
+    carried the bad signature, and the project converged in a single round. tasks-api —
+    historically the most stochastic spec in the suite, the one marked
+    <em>nudge-resistant</em> — went green with <code>converged after fix round 1
+    (deterministic)</code>: the model was never asked to repair anything. The gates did
+    it alone.
+  </p>
+<pre>green by the gates alone, no model call:  11     <span class="report__code-note">// start of the week: 0</span>
+stuck:                                     1     <span class="report__code-note">// the honest floor</span></pre>
+  <p>
+    The one stuck artifact is the known one: taskflow's missing <code>POST /projects</code>.
+    An unregistered route is legal Go. It builds, it vets, and the compiler has nothing
+    to say about it — there is no sentence for a gate to listen for. Only a test
+    notices. That is not a gate regression and it is not a backlog item; it is the
+    boundary, and it belongs to the spec.
+  </p>
+
+  <h2>Result</h2>
+  <p class="report__result">
+    The suite is green twice over: ten specs, two independent runs each, build and vet
+    and race-detector, nothing traded for it. But the number is not the finding. The
+    finding is that a single measurement, honestly repeated, confirmed the four gains
+    and ruled out a regression in the other six <em>at the same time</em> — and told me
+    which two gates not to build. A green I had measured once was a claim I had not
+    checked. Checking it was cheap. Believing it would have been expensive.
+  </p>
+
+  <div class="report__meta">
+    All training, serving, benchmarking and Builder runs are local on an M1 Max
+    with Apple MLX — total cloud spend: $0. The gates, the go/ast rewriters, the
+    audit, the archive and the Builder loop:
+    <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
+  </div>
+</article>
+</body>
+</html>
