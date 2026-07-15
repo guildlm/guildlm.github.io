@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #24 — A stack of masks · GuildLM Research</title>
+<meta name="description" content="I went in to answer one question: were the week's gains the machine generalizing, or ten specs slowly memorized? A brand-new domain — a double-entry ledger the corpus had never seen — answered a better one. It did not fail once. It failed in a stack, each defect masking the one beneath it, because a compile error in a dependency hides every package that imports it. Peeling that stack took eight runs. Two layers were the machinery's and it cleared them live. Several were the model's, and they fell to showing the code instead of describing it. One was a deadlock the model could not fix. And the deepest was a spec contradiction no model could ever satisfy — invisible for the entire experiment because the code never ran far enough to reach it.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #24 · 2026-07-15</div>
+  <h1>A stack of masks</h1>
+  <p class="report__lede">
+    The last report left a question hanging that its own numbers could not answer:
+    ten specs are green twice over, but every one of them had been reworked this
+    week. Are the gains the machine getting better, or ten specs slowly memorized?
+    There is one honest way to ask — take a domain the corpus has never seen, write
+    it once, and run it. So I did. It did not answer the overfit question. It
+    answered a better one, and the answer came in layers.
+  </p>
+
+  <h2>The held-out domain, and an honest correction</h2>
+  <p>
+    <code>ledger</code>: a standard-library-only HTTP backend for double-entry
+    accounting — a money primitive, domain models, a store, a service enforcing the
+    accounting invariant, an HTTP layer, and a graceful-shutdown main. Five
+    packages, nineteen files, nothing like it in the training corpus. The intent was
+    "write it once against the checklist, never tune it, run it once."
+  </p>
+  <p>
+    <strong>It did not stay that way, and pretending otherwise would be the whole
+    mistake.</strong> Closing it green took five runs and a series of spec fixes. The
+    value here is not "it passed untouched." It is the <em>stack</em> of distinct
+    failures a fresh domain surfaced, and — the part that matters — <em>who owned
+    each one</em>.
+  </p>
+
+  <h2>Everything was masked</h2>
+  <p>
+    The structural fact that shaped the whole experiment: <strong>a compile error in
+    a package hides every package that imports it.</strong> <code>money</code> is
+    imported by <code>models</code>, <code>store</code>, <code>service</code> and
+    <code>api</code>. So for as long as <code>money</code> failed to compile, every
+    bug downstream of it was invisible — the build never type-checked far enough to
+    see them. Each fix peeled one layer and revealed the next. What looked like "one
+    stubborn spec" was a column of independent defects, stacked, each wearing the one
+    above it as a mask.
+  </p>
+<pre>run 1-2   money.go            compile error   <span class="report__code-note">// masks models, store, service, api</span>
+run 3     models.go           total.Add()     <span class="report__code-note">// revealed once money compiled</span>
+run 3     store.go            models.Money    <span class="report__code-note">// gate cleared it</span>
+run 4     store (runtime)     DEADLOCK        <span class="report__code-note">// revealed once it all compiled</span>
+run 4     service (runtime)   InsufficientFunds contradiction
+run 4/5   store (runtime)     sentinel vs errors.New</pre>
+
+  <h2>Two layers were the machinery's — cleared live</h2>
+  <p>
+    The model kept qualifying the money type as <code>models.Money</code> instead of
+    <code>money.Money</code> — a name-similarity slip in four places in
+    <code>store.go</code>. A gate written weeks ago repaired it in round one, across
+    seven files at once, no model call. And the moment the build compiled far enough,
+    <code>models.go</code> tried to sum postings with an invented method on an int64:
+  </p>
+<pre>total.Add undefined (type money.Money has no field or method Add)
+  widening fix targets to the declaration of type Money (missing method Add)</pre>
+  <p>
+    That second line is the deaf-routing widener — and it fired on the
+    <em>qualified</em> form <code>type money.Money has no method Add</code>. Earlier
+    this same session I'd found that widener was deaf to exactly this shape: its regex
+    only recognised the bare <code>type Store has no method</code>, and missed both
+    <code>*service.Ledger</code> and <code>money.Money</code>. I widened it and wrote a
+    test. Here it was, firing live on a defect it would have slept through a day ago.
+    A gate is only as good as the sentence it listens for — and this one had just
+    learned a new sentence.
+  </p>
+
+  <h2>panic: boom was a lie at the top of the log</h2>
+  <p>
+    Then the build compiled clean and a test failed at runtime, and the log showed
+    this at the top:
+  </p>
+<pre>! 2026/07/15 14:18:45 panic: boom
+  widening fix targets to package impl in internal/api (persistent runtime failure)</pre>
+  <p>
+    For two fix rounds I read that as the failure — a panic escaping the recovery
+    middleware. <strong>It was not the failure. It was a log line.</strong>
+    <code>panic: boom</code> is what the Recover middleware <em>prints</em> —
+    <code>log.Printf("panic: %v", err)</code> — when it <em>correctly</em> catches
+    the panic and returns 500. <code>TestRecoverMiddleware</code> passes. A recovered
+    panic doesn't crash; it logs. The real failures were further down, where the log
+    display had truncated them off the top. Only running the tests myself surfaced
+    them. It is the same lesson as a deadlock that reached the model wearing the word
+    "timed out": the loudest line in the output is not the cause of the failure, and
+    a log that shows you the top of a stack is not showing you the bottom.
+  </p>
+
+  <h2>The deadlock the model could not fix</h2>
+  <p>
+    Underneath <code>panic: boom</code>, a store test hung for the full timeout and
+    Go printed the goroutine dump — which named the bug in two lines:
+  </p>
+<pre>store.(*MemStore).GetAccount(...)         <span class="report__code-note">// takes RLock</span>
+store.(*MemStore).CreateTransaction(...)  <span class="report__code-note">// already holds Lock</span></pre>
+  <p>
+    <code>CreateTransaction</code> took the write lock and then, still holding it,
+    called <code>GetAccount</code>, which takes a read lock on the same mutex.
+    <code>sync.RWMutex</code> is not reentrant, so the goroutine wedged forever. The
+    deadlock-surfacing fix from earlier this session worked exactly as designed — Go
+    hit its own timeout before the harness killed the process, so the naming trace
+    reached the log. But <em>surfacing is not fixing</em>: across five rounds the
+    model could not restructure the locking. That earned a spec-level pin — inside the
+    held write lock, check <code>s.accounts[id]</code> directly; never call a method
+    that re-locks. A stochastic concurrency bug the compiler cannot see, made
+    deterministic by naming the discipline the model kept missing.
+  </p>
+
+  <h2>The one no model could satisfy</h2>
+  <p>
+    And then the deepest layer, the one that had been hiding under every compile error
+    for the entire experiment: a <strong>contradiction in the spec itself</strong>.
+    The service's <code>Post</code> was shown with an overdraft check —
+    reject any posting that drives a balance below zero:
+  </p>
+<pre>if balances[p.AccountID]+p.Amount &lt; 0 { return ErrInsufficientFunds }</pre>
+  <p>
+    But this is a <em>double-entry</em> ledger: every balanced transaction has
+    postings that sum to zero, so one side is always negative. That check rejects
+    every balanced transaction that ever existed. And the two tests meant to pin it
+    could only be told apart by account identity:
+  </p>
+<pre>TestPostBalanced          cash +500, rev -500   → expect SUCCESS   <span class="report__code-note">// rev goes negative, fine</span>
+TestPostInsufficientFunds cash -100, rev +100   → expect FAILURE   <span class="report__code-note">// cash goes negative, not fine</span></pre>
+  <p>
+    "rev may go negative, cash may not" is a real accounting rule — assets can't
+    overdraw, revenue accounts carry credit balances — but it requires an account
+    <em>type</em> that <code>models.Account{ID, Name}</code> never had. There is no
+    rule on balance and amount alone that passes both tests. No model could satisfy
+    this spec, because the spec asked for something arithmetically impossible without
+    a field it never defined. I wrote that contradiction, in a past session, and it
+    survived a week of green runs — because the code never once ran far enough to
+    reach it. I resolved it by removing the ill-specified feature; the correct
+    alternative, account types, is a larger redesign for another day.
+  </p>
+  <blockquote>
+    A green suite tells you the tests that exist pass. It cannot tell you the spec is
+    consistent — and a contradiction downstream of a compile error is invisible until
+    the day the compiler lets the runtime reach it.
+  </blockquote>
+
+  <h2>What was actually the model's</h2>
+  <p>
+    Strip out the machinery's two layers, the deadlock, and the spec contradiction,
+    and what remains that was genuinely the model's own limit was small and of one
+    kind: <strong>numeric and mechanical choices the spec described instead of
+    showing.</strong> <code>Money.String()</code> dropped the leading <code>"0."</code>
+    and then the sign; <code>Parse</code> lost the sign on negatives; the postings sum
+    used an invented <code>.Add</code>; the store returned <code>errors.New(...)</code>
+    where the tests matched a sentinel with <code>errors.Is</code>. Every one of them
+    fell to the same remedy: stop describing the behavior and show the code — the whole
+    of <code>String()</code> and <code>Parse()</code>, the <code>total += p.Amount</code>
+    operator, the <code>models.ErrNotFound</code> sentinel returned directly. Describe a
+    trap and the model walks into it; show the code and it copies it.
+  </p>
+
+  <h2>The runtime long tail</h2>
+  <p>
+    There is a second masking structure underneath the first, and it is the one that
+    actually decided how many runs this took. Once the project compiled, it turned out
+    that <strong>every run failed at runtime on a <em>different</em> domain method</strong>
+    — and always a method the spec had described rather than shown:
+  </p>
+<pre>run 4   the store returned errors.New(...) where a sentinel was expected   <span class="report__code-note">// self-fixed round 2</span>
+run 5   CreateTransaction called GetAccount under its own lock → deadlock  <span class="report__code-note">// model could not fix</span>
+run 6   the service read a balance off the Account, which has no balance   <span class="report__code-note">// red</span></pre>
+  <p>
+    Every one of them is a numeric, stateful, or concurrency method — the exact class
+    the money bug belongs to. The <em>standard</em> parts — the HTTP handlers, the
+    router, the simple delegations — reproduced cleanly every time. So the reliability
+    of a nineteen-file project is not "can the model synthesize nineteen files." It is
+    "how many of its <em>mechanical</em> methods are shown versus merely described" —
+    because at nineteen files, some run will always roll the one you only described. I
+    closed the tail the only way that has ever worked here: I showed each method's code,
+    one at a time, as each run surfaced it — the sentinel returned directly, the
+    lock-free account check, the balance read from the store's map.
+  </p>
+  <blockquote>
+    The compile layer belongs to the gates, and they clear it. The runtime long tail
+    belongs to the spec author: every method with a trap in it has to be shown, because
+    describing it only sets the odds of which run walks into it.
+  </blockquote>
+  <p>
+    One of those pins I first put in the wrong place, which is its own small lesson. The
+    lock discipline went into the file the spec <em>says</em> owns the store
+    implementation — but the model consolidates the whole store into a different file and
+    leaves that one empty, so the pin was attached to nothing, and the deadlock came back
+    on the reproduction run. A spec pin is only as good as the file the model actually
+    reads it on, and only as good as whether it shows the code or merely describes it.
+  </p>
+
+  <h2>Validated before it was spent</h2>
+  <p>
+    One method note, because it is the discipline that kept this honest. Before
+    spending a thirty-minute model run on any fix, I snapshotted the red artifact,
+    applied the fix by hand, and ran <code>go test ./...</code> and
+    <code>go&nbsp;test&nbsp;-race</code> on it. Green on the snapshot proves the spec
+    is <em>satisfiable</em> — that the fix I'm about to ask the model for actually
+    works — before I ask for it. A reference implementation is not the model
+    succeeding; it is the proof that the model <em>can</em>.
+  </p>
+
+  <h2>Result</h2>
+  <p class="report__result">
+    The held-out ledger is green, and green twice: two independent runs, build, vet
+    and the race detector across five packages, both converging on the first fix
+    round, both at 84.9% of their own code executed. It took eight runs to earn that
+    — the first green, on run four, was a lucky roll that dodged the deadlock, and the
+    number only became trustworthy once every mechanical method was shown, not
+    described. The overfit question turned out to be the wrong one. A fresh domain is
+    not a single test you pass or fail; it is a stack of masked failures — a compile
+    layer the gates clear and a runtime tail the spec author must close, one shown
+    method at a time. Two of its layers were the machinery's and it cleared them live;
+    one was a deadlock the model couldn't fix and a shown block could; one was a spec
+    contradiction no model could ever satisfy. The genuine model residue was a handful
+    of numeric and stateful traps that a shown line of code dissolves. When the code
+    finally runs, the question is not whether the model overfit. It is whose bug you
+    find — and layer by layer, mostly, it was not the model's.
+  </p>
+
+  <div class="report__meta">
+    All training, serving, benchmarking and Builder runs are local on an M1 Max
+    with Apple MLX — total cloud spend: $0. The gates, the go/ast rewriters, the
+    audit, the archive and the Builder loop:
+    <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
+  </div>
+</article>
+</body>
+</html>
