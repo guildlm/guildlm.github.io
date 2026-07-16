@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #25 — The number belonged to the process · GuildLM Research</title>
+<meta name="description" content="I shipped a prompt default in the morning on a clean A/B — 42.4% coverage without it, 75.4% with it — and turned it off by evening. Nothing about the rule changed in between. The baseline did. Chasing that number down cost me three retractions in one day and produced the finding the whole project needed: this server is deterministic within a process and different across processes, so every A/B I have ever compared across sessions was measuring the machine's mood, not the model. Along the way, best-of-N turned out never to have worked — 2,905 draws, zero rescues — while the project's own notes marked it as done.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #25 · 2026-07-16</div>
+  <h1>The number belonged to the process</h1>
+  <p class="report__lede">
+    This morning I shipped a prompt default on a clean A/B: one spec sat at 42.4%
+    coverage without it and 75.4% with it, same session, same server, arms
+    isolated. By evening I had turned it off. Nothing about the rule changed in
+    between. The baseline did — and finding out why cost me three retractions in
+    a single day and produced the measurement this project actually needed.
+  </p>
+
+  <h2>The rule, and the number that bought it</h2>
+  <p>
+    The defect was real and I had watched it happen. <code>ratelimit</code>'s spec
+    asks for HTTP flow tests through a request helper. The model wrote three easy
+    unit tests, defined the helper, <em>never called it</em>, and left the
+    middleware, router and handlers at zero coverage — 42.4% behind a suite that
+    reported green. One sentence in the test-file default fixed it: write one
+    focused function for every scenario the purpose names. Coverage came back to
+    75.4%, twice, from a baseline that had been stable at 42.4% three runs
+    running. That is a clean within-session A/B, and I shipped on it.
+  </p>
+  <p>
+    Before shipping I ran the same experiment on a second spec, <code>workapi</code>,
+    three runs per arm with the arms alternated. It found something better than the
+    number I was after:
+  </p>
+<pre>arm         verdict    coverage   test funcs
+with 1/2/3  GREEN x3   81.1 x3    <strong>35 35 35</strong>
+without 1/2/3 GREEN x3 81.1 x3    <strong>34 34 34</strong></pre>
+  <p>
+    Exactly one function, every run, reproducibly: <code>TestListSorted</code> —
+    which the spec <em>names in so many words</em>, on line 145. Caught before any
+    gate ran, so it is the model's own behaviour: rule off, it drops a test the
+    spec asked for by name; rule on, it writes it. Coverage never moves, because
+    the test asserts <em>ordering</em>, and code that returns sorted and code that
+    returns unsorted execute the same lines.
+  </p>
+  <p>
+    <strong>I nearly called the rule inert on that spec by reading the coverage
+    column.</strong> The metric would have hidden a real gain, and the ladder this
+    project keeps climbing gets a third rung: green says the tests that exist
+    pass; coverage says they reach the code; <em>neither says the assertions mean
+    anything</em>.
+  </p>
+
+  <h2>A default may not carry one spec's furniture</h2>
+  <p>
+    The rule's wording named <code>ratelimit</code>'s own scenarios — a
+    <code>hit()</code> helper, an allow-then-deny sequence, a two-client case —
+    inside a rule that fires for <em>every</em> test file in the suite. I kept them
+    on purpose: the 42.4 → 75.4 recovery was evidence for that exact text, and a
+    principle-only rewrite would have been unproven. Then I measured it on
+    <code>shortener</code>, the spec where the mechanism predicted it would pay
+    <em>most</em> — zero named test functions, everything left to prose.
+  </p>
+<pre>arm           test funcs   coverage   verdict
+with 1/2/3    10 10 10     <strong>0.0 x3</strong>     NOT-GREEN x3
+without 1/2/3  2  2  2     72.7 x3    GREEN x3
+
+vet: ./shortener_test.go:58:36: not enough arguments in call to doReq</pre>
+  <p>
+    The rule's first half works even here: two test functions become ten, exactly
+    as designed. What fails is the half I bolted on without testing — that more
+    tests means more coverage. The model cannot keep ten of them coherent, the
+    file does not compile, and the rule buys ten tests that run zero lines.
+  </p>
+  <p>
+    The discriminator is this project's own law, with my own default as its victim:
+  </p>
+<pre>grep -c "func hit(h http.Handler" specs/ratelimit.yaml  -> 1   <span class="report__code-note">// SHOWN, in full</span>
+grep -cE "func (doReq|hit|newReq)" specs/shortener.yaml -> 0   <span class="report__code-note">// nothing shown</span></pre>
+  <p>
+    <code>ratelimit</code>'s spec shows the helper's code, so demanding flow tests
+    through it works. <code>shortener</code>'s shows nothing, so the same demand
+    makes the model <em>invent</em> a helper and miscall its arity. The held-out
+    ledger already taught this: a mechanical construct that is described rather
+    than shown is where this model breaks, and the cure is to show the code. The
+    rule transplanted one spec's shape into every test file in the suite, and only
+    that spec carried the code to support it. <strong>It read as a principle and
+    behaved as a transplant.</strong>
+  </p>
+  <p>
+    Stripping the furniture and stating the law plainly — do not invent a helper
+    the purpose did not show — worked, half way. The invention stopped, vet went
+    clean, coverage went 0.0 → 64.6. The green did not come back: the model now
+    writes the flow tests and <em>guesses</em> the short code (<code>/r/0</code>)
+    instead of using the record that <code>Save()</code> hands it, so the redirect
+    404s. One mask off, the next one underneath.
+  </p>
+
+  <h2>best-of-N had never once worked</h2>
+  <p>
+    While chasing that, I finally read a number the logs had been printing for
+    weeks. Across every A/B log on disk:
+  </p>
+<pre>kept candidate 1 of 2 : <strong>3217</strong>
+kept candidate 2 of 2 : <strong>0</strong>      <span class="report__code-note">// a resample has NEVER rescued a draw</span>
+no clean candidate    : <strong>320</strong>    <span class="report__code-note">// it failed identically instead, 320 times</span></pre>
+  <p>
+    Three hundred and twenty times a candidate came back dirty, got redrawn, and
+    came back dirty in precisely the same way. Zero rescues out of 320 is not bad
+    luck. The cause is one line: every attempt called the coder with the
+    <em>same prompt</em>, and this server is deterministic — same prompt in,
+    byte-identical text out. Candidate 2 <em>was</em> candidate 1. The loop paid
+    for a second generation and threw an identical file away, while the project's
+    own notes listed the technique stack as "best-of-N ✓".
+  </p>
+  <p>
+    Temperature is the one handle that moves this server: 0.1 and 0.6 on an
+    identical prompt return genuinely different files, and each stays
+    deterministic at its own value. So the first draw keeps the near-greedy
+    default — the common path is unchanged — and every retry steps the
+    temperature. That makes a genuinely different second candidate <em>possible</em>
+    without trading away reproducibility.
+  </p>
+  <p>
+    <strong>Possible is not proven, and this report of all reports is not going to
+    blur that.</strong> The repair has not fired once since it landed: the counter
+    above still reads 320 dirty redraws, unchanged, because every draw since has
+    been clean on the first try. What is measured is that the mechanism <em>can</em>
+    now produce a different sample — verified against the live server, not read off
+    the source. Whether a real second candidate ever rescues a real build is
+    unmeasured, and those 320 historical failures are the population to measure it
+    against.
+  </p>
+
+  <h2>The number belonged to the process</h2>
+  <p>
+    Then the re-runs came back, and they refused both of the outcomes I had
+    written down in advance.
+  </p>
+<pre>server started 09:27:   with <strong>74.6</strong> / without <strong>74.6</strong>    <span class="report__code-note">// rule: no effect</span>
+server started 17:09:   with <strong>75.0</strong> / without <strong>75.0</strong>    <span class="report__code-note">// rule: no effect</span></pre>
+  <p>
+    The 42.4% baseline that justified the entire rule never came back. The OFF arm
+    writes the flow tests by itself, calling the helper four times — the exact
+    behaviour the rule exists to force. Seven arms, two server processes, zero
+    effect.
+  </p>
+  <p>
+    I checked my own changes before blaming anything, because I had already been
+    burned twice that day: the best-of-N retry never fired in those runs; the
+    toolchain-output fix only touches fix prompts and those runs had no fix rounds
+    at all; the OFF arm's prompt is byte-identical to the morning's. Same input,
+    different output. The one thing that differed was the <em>server process</em>.
+  </p>
+  <p>
+    Now read 74.6 against 75.0. Identical code, identical prompts, two processes,
+    two numbers. And every determinism measurement I had built the day's reasoning
+    on — three 1200-token completions byte-identical, prompt A then B then A
+    returning A's first output, three consecutive runs generating byte-identical
+    files across eighteen files — <strong>was taken inside a single process.</strong>
+    They were all true. They were all incomplete.
+  </p>
+  <p class="report__callout">
+    <strong>Deterministic within a process. Different across processes.</strong>
+    That is the shape of the 75.0 → 42.4 drift this project has been failing to
+    explain for days. And it means the +33 that bought the rule was measured
+    against a baseline belonging to one process's state — not to the model.
+    <em>An A/B is only valid inside one process.</em> Numbers from different
+    sessions were never comparable, and I had been comparing them all week.
+  </p>
+
+  <h2>The ledger, and the revert</h2>
+<pre>ratelimit    0 effect       <span class="report__code-note">// 2 processes, 7 arms</span>
+workapi      +1 test        <span class="report__code-note">// real, 3/3, pre-gate — and invisible to coverage</span>
+shortener    loses green    <span class="report__code-note">// 5/5, across both wordings</span></pre>
+  <p>
+    A cost that reproduces and a benefit that does not. A default does not ship on
+    that, however much I want the idea to be true — and I do; I found the workapi
+    result myself the same morning. So the rule is off by default, opt-in behind
+    an environment switch. Not deleted: deleting it would throw away the workapi
+    finding along with the rule, and force the next person to rebuild the thing
+    before they could measure it.
+  </p>
+  <p>
+    What earns it back, in order: fix <code>shortener</code>'s <em>spec</em> — it
+    names no tests and never says to use what <code>Save</code> returns, and this
+    project's law is that implicit means broken and naming is the spec author's
+    job; re-run it; then reproduce the 42.4 failure deliberately, in one process,
+    before ever claiming again that the rule prevents it.
+  </p>
+
+  <h2>Three stories I told past my own measurements</h2>
+  <p>
+    The rule is the smaller finding. The larger one is the pattern in how I got
+    here, three times in one day, each time with the evidence already in hand:
+  </p>
+  <p>
+    <strong>The seed.</strong> I wrote in a commit message that the serving layer
+    honours a per-request seed and the reproducibility hole was closable. I had
+    read the source, quoted the line number, and never run it. Seeds 1, 999 and
+    123456 return byte-identical completions. The seed does nothing on the path
+    these requests take.
+  </p>
+  <p>
+    <strong>The cache.</strong> Go's test cache is machine-wide, so a sixth run of
+    a spec can be handed text the first five never saw — and that text reaches the
+    model, verbatim, inside the fix prompt. All true, and worth stripping. Then I
+    wrote that this contamination caused that run's failure. The timeline refutes
+    it: the cached lines first appear in round 3, and the run had already left its
+    arm's path in round 1. Divergence precedes contamination. If anything the
+    arrow reverses — a run only reaches the test stage, where the cache marker can
+    appear at all, once it is already limping. I found a real contaminant and
+    attached a false story to it, and retracted it the same day.
+  </p>
+  <p>
+    <strong>best-of-N.</strong> A mechanism that existed, was checked off as
+    working, and had never fired — with the proof printed on every line of every
+    log for weeks.
+  </p>
+  <p>
+    Three different mechanisms, one habit: I find something real, and then I
+    narrate past what I measured. This project's own law keeps re-earning itself —
+    <em>an outcome does not name its cause</em>, and <em>a mechanism that exists in
+    the source is not a mechanism that fires</em>. Today it collected a third
+    clause: <em>a number is only as good as the process it was measured in</em>.
+  </p>
+
+  <h2>What survives</h2>
+  <p>
+    The day cost a default and bought four things worth more than it. The model
+    drops tests a spec <em>names</em> — reproducibly, before any gate touches the
+    file — and coverage cannot see the loss when the test asserts ordering.
+    best-of-N <em>can</em> now draw a genuinely different candidate instead of the
+    same one twice, which is not the same as having done it yet. Prompt defaults
+    have a permanent off-switch, because every one of them
+    was earned by measuring it against its own absence and the switch kept being
+    deleted the moment it had answered one question. And the ruler is calibrated
+    at last: within a process it is exact, across processes it is a different
+    ruler, and no A/B may straddle the two.
+  </p>
+  <p>
+    The rule I shipped this morning is off tonight. That is not a failed day. The
+    baseline that justified it was never real, and the only reason I know that is
+    that I ran the experiment that could have embarrassed me — twice, on a fresh
+    process, after I had already written which answer I wanted.
+  </p>
+
+  <div class="report__meta">
+    All training, serving, benchmarking and Builder runs are local on an M1 Max
+    with Apple MLX — total cloud spend: $0. The gates, the go/ast rewriters, the
+    A/B harness, the raw-generation snapshotter and the Builder loop:
+    <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
+  </div>
+</article>
+</body>
+</html>

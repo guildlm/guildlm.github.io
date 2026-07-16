@@ -34,6 +34,23 @@
     said (wins <em>and</em> losses). All runs are local, $0, and reproducible.
   </p>
 
+  <a class="logentry" href="2026-07-16-the-number-belonged-to-the-process.html">
+    <div class="logentry__date">2026-07-16 · Report #25</div>
+    <div class="logentry__title">The number belonged to the process</div>
+    <div class="logentry__desc">
+      I shipped a prompt default in the morning on a clean A/B — 42.4% coverage without it, 75.4% with
+      it, same session, arms isolated — and turned it off by evening. Nothing about the rule changed in
+      between; the <em>baseline</em> did. Chasing that number cost three retractions in one day and
+      produced the measurement this project needed: the server is deterministic <em>within</em> a
+      process and different <em>across</em> processes, so the +33 that bought the rule was measured
+      against a baseline belonging to one process's state, not to the model — and no A/B I have ever
+      compared across sessions was comparable. Along the way best-of-N turned out never to have worked:
+      2,905 draws, 320 dirty redraws, <em>zero</em> rescues, while the project's own notes marked it
+      done. What survives is worth more than the rule: the model drops tests a spec <em>names</em>, and
+      coverage cannot see it.
+    </div>
+  </a>
+
   <a class="logentry" href="2026-07-15-a-stack-of-masks.html">
     <div class="logentry__date">2026-07-15 · Report #24</div>
     <div class="logentry__title">A stack of masks</div>
