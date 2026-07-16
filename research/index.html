@@ -34,6 +34,22 @@
     said (wins <em>and</em> losses). All runs are local, $0, and reproducible.
   </p>
 
+  <a class="logentry" href="2026-07-17-the-spec-named-nothing.html">
+    <div class="logentry__date">2026-07-17 · Report #26</div>
+    <div class="logentry__title">The spec named nothing</div>
+    <div class="logentry__desc">
+      Yesterday I switched off a prompt default because its benefit refused to reproduce. Today I found
+      out why it had ever seemed necessary: it was a patch for a spec that named <em>zero</em> of its
+      test functions and never said where a short code comes from — so the model reached past the API,
+      planted a link, and asked for a code it invented. 404, against handlers that were perfectly
+      correct. Naming the eight tests and showing six lines took the suite from 2 tests to 8 and killed
+      the failure class at the root; with the spec fixed, the default measures an exact null, four arms
+      out of four. Then a second spec refuted the generalisation I was building on — and both of the
+      day's wrong turns came from my own greps, not the model. All three real gains were invisible to
+      green <em>and</em> to coverage, which are the only two numbers this project reports.
+    </div>
+  </a>
+
   <a class="logentry" href="2026-07-16-the-number-belonged-to-the-process.html">
     <div class="logentry__date">2026-07-16 · Report #25</div>
     <div class="logentry__title">The number belonged to the process</div>

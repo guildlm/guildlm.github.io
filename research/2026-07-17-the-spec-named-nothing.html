@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #26 — The spec named nothing · GuildLM Research</title>
+<meta name="description" content="Yesterday I turned off a prompt default because its benefit would not reproduce. Today I found out why it had ever looked necessary: it was a patch for a spec that named none of its tests and never said where a short code comes from. Naming the eight tests and showing six lines of code took the suite from two tests to eight and removed a whole class of failure at the root — and with the spec fixed, the default I had been agonising over measures as an exact null, four arms out of four. Then a second spec refuted the generalisation I was building on. And all three real gains today were invisible to both of the numbers this project reports.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #26 · 2026-07-17</div>
+  <h1>The spec named nothing</h1>
+  <p class="report__lede">
+    Yesterday I switched off a prompt default because its benefit refused to
+    reproduce. Today I found out why it had ever seemed necessary. It was a patch
+    for a spec that named none of its tests and never said where a short code
+    comes from — and once the spec said both, the default I had spent a day
+    agonising over measured as an exact null, four arms out of four.
+  </p>
+
+  <h2>The model was not guessing. It was doing what the spec allowed.</h2>
+  <p>
+    <code>shortener</code>'s suite reported 72.7% coverage and green, on two test
+    functions. Here is what one of them did:
+  </p>
+<pre>store := NewMemStore()
+store.Save("http://example.com")
+req := httptest.NewRequest("GET", "/r/0", nil)   <span class="report__code-note">// the code is whatever Save assigned. Not "0".</span>
+
+--- FAIL: TestRedirectHandler   want 301, got 404</pre>
+  <p>
+    A 404 against handlers that are perfectly correct. The model reached past the
+    API, planted a link in the store directly, and then asked for a code it had
+    invented. And the spec had never said otherwise: it described the flow in
+    prose — "POST /shorten to get the code, then GET /r/{code}" — named
+    <strong>zero</strong> test functions, and showed no code at all.
+  </p>
+  <p>
+    So the purpose now names all eight, and shows the six lines that take the code
+    out of the response, ending in the only sentence that matters:
+  </p>
+<pre>var created Link
+if err := json.NewDecoder(rec.Body).Decode(&amp;created); err != nil { t.Fatal(err) }
+<span class="report__code-note">// created.Code is the ONLY code that exists. Use it:</span>
+h.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/r/"+created.Code, nil))</pre>
+  <p>Measured, two runs, one server process:</p>
+<pre>                 test funcs   coverage   verdict
+old spec              2         72.7%     GREEN
+fixed spec            <strong>8</strong>         73.1%     GREEN   <span class="report__code-note">// x2, identical</span>
+
+guessed codes: <strong>0</strong>        reads created.Code out of the response: <strong>19</strong></pre>
+  <p>
+    The eight are exactly the eight named. The 404 class is gone at the root — not
+    gated, not nudged, not retried. It cannot happen, because the test no longer
+    has a code to invent.
+  </p>
+
+  <h2>And the default I agonised over is a null</h2>
+  <p>
+    The rule I spent yesterday on — write one focused test function per scenario —
+    broke this exact spec three runs out of three when the spec left its tests
+    implicit: ten test functions, a test file that would not compile, 0.0%
+    coverage. That was the evidence that sent it off by default.
+  </p>
+  <p>Re-run against the fixed spec, arms alternated, one process:</p>
+<pre>arm         test funcs   coverage   verdict
+with 1/2        8            73.1%    GREEN
+without 1/2     8            73.1%    GREEN</pre>
+  <p class="report__callout">
+    Four arms, four identical results. <strong>The rule's harm was never the
+    rule's. It was a function of the spec's silence</strong> — and with the
+    silence gone, the rule is not harmful, it is simply nothing. It was a patch
+    over an under-specified spec, and I had been debating the patch.
+  </p>
+
+  <h2>Then the second spec refuted the theory</h2>
+  <p>
+    Twelve specs in the suite name two or fewer test functions. <code>shortener</code>
+    was one, and it had a real, measured defect. The obvious next move was to fix
+    them all. <code>logstats</code> looked identical: names zero, ships two
+    top-level test functions, no subtests, no tables.
+  </p>
+  <p>
+    I ran <code>grep -c ErrBadLine</code> on its test file, got <code>1</code> where
+    the spec enumerates four bad-line cases, and had my confirmation. Then I read
+    the file instead of the grep. It tests <strong>all four</strong>, in a loop.
+    The literal appears once because the assertion is <code>err == nil</code>.
+  </p>
+  <p>
+    <strong>Named-test count does not predict under-testing.</strong>
+    <code>logstats</code> names nothing and covers everything;
+    <code>shortener</code> was under-tested because it bypassed the API, not
+    because its tests were unnamed. Same symptom, different defect, and no
+    suite-wide sweep is justified. The generalisation died on the second data
+    point, which is the cheapest place for a generalisation to die.
+  </p>
+  <p>
+    What <code>logstats</code> did have was the mirror image of shortener's bug.
+    The spec said those four bad lines "all return ErrBadLine via errors.Is". The
+    test asserted only that <em>something</em> failed — so a ParseLine returning
+    any random error passes, and the sentinel contract the file exists to pin was
+    not tested at all. Cases kept, assertion hollowed out. The spec had already
+    said <code>errors.Is</code>, in prose, and the model wrote <code>err != nil</code>
+    anyway. So show it instead of saying it:
+  </p>
+<pre>if _, err := ParseLine(bad); !errors.Is(err, ErrBadLine) {
+    t.Errorf("ParseLine(%q): err = %v, want ErrBadLine", bad, err)
+}
+
+errors.Is(err, ErrBadLine) checks:  0 → <strong>4</strong>     <span class="report__code-note">// one per bad line, transcribed exactly</span>
+coverage:                        82.0% → <strong>82.0%</strong>  <span class="report__code-note">// unchanged to the decimal</span></pre>
+
+  <h2>Every real gain today was invisible to both numbers</h2>
+  <p>
+    That flat 82.0% is the third independent instance in two days of the same
+    thing, and by now it is not an anecdote:
+  </p>
+<pre>TestListSorted        a spec-NAMED test the model dropped        coverage +0.0
+shortener             2 test functions became 8                  coverage +0.4
+logstats              4 sentinel assertions where there were 0   coverage +0.0</pre>
+  <p>
+    The shortener suite now checks that a redirect returns 301, that Location
+    equals the original url, that a missing code 404s, that a bad request 400s,
+    that Hits is exactly 1 after exactly one hit. Before, it checked none of them
+    and reported 72.7%. Those assertions execute the same lines either way.
+  </p>
+  <p class="report__callout">
+    Green says the tests that exist pass. Coverage says the tests that exist reach
+    the code. <strong>Neither says the assertion is the one the contract asked
+    for</strong> — and this project reports exactly those two numbers.
+  </p>
+
+  <h2>Twice, the instrument was the thing that lied</h2>
+  <p>
+    Both of today's wrong turns came from a grep, not from the model. The
+    ErrBadLine count that read as "one case of four" was one literal over four
+    cases. And a column I generated to ask "does this spec show code?" answered
+    <em>no</em> for <code>ratelimit</code> — the one spec that shows a helper's
+    body in full — because the regex only looked for <code>h :=</code> assignment
+    lines. I nearly published that table.
+  </p>
+  <p>
+    The rule that came out of it is duller than the one I wanted and more useful:
+    <strong>read the file, not the grep</strong>, and test a heuristic against a
+    case you already know the answer to before you trust its verdict on cases you
+    do not.
+  </p>
+
+  <h2>What this leaves</h2>
+  <p>
+    Two days ago the question was which prompt default to ship. Today the answer
+    is that the default was never the lever. A spec that names its tests gets
+    them. A spec that shows the code gets the code. A spec that leaves either one
+    implicit gets whatever the model improvises — and then a default gets invented
+    to argue with the improvisation, measured, agonised over, and eventually
+    turned off, while the actual defect sits in a YAML file nobody re-read.
+  </p>
+  <p>
+    Which is the same law this project keeps re-earning from a new direction:
+    implicit means broken, prose loses to shown code, and the compile-and-test
+    machinery cannot recover what the specification never said. The machine's job
+    is to catch what the model gets wrong. It was never going to catch what the
+    spec forgot to ask for.
+  </p>
+
+  <div class="report__meta">
+    All training, serving, benchmarking and Builder runs are local on an M1 Max
+    with Apple MLX — total cloud spend: $0. The gates, the go/ast rewriters, the
+    A/B harness and the Builder loop:
+    <a href="https://github.com/guildlm/builder" target="_blank" rel="noopener">github.com/guildlm/builder</a>.
+  </div>
+</article>
+</body>
+</html>
