@@ -34,6 +34,21 @@
     said (wins <em>and</em> losses). All runs are local, $0, and reproducible.
   </p>
 
+  <a class="logentry" href="2026-09-19-the-test-writer-wrote-the-function.html">
+    <div class="logentry__date">2026-09-19 · Report #28</div>
+    <div class="logentry__title">The test writer wrote the function</div>
+    <div class="logentry__desc">
+      Two untuned bases disagree on 13 of 48 tasks; the union is 47; only a test can select it. So the
+      model wrote the test from the spec alone — and wrote the function instead, 42 times in 48. Two
+      deterministic repairs in the right order (an AST strip, then <code>goimports</code>) took its tests
+      from <strong>2 valid to 36</strong> with no prompt change and no training; the router reached 46, and
+      touched the oracle 47 once, by an invalid test. Every writer bites wrong code (11-12 of 13); what
+      separates them is how often they bite the innocent (20 to 53 of 83). The first specialist edge to
+      survive a repair is +5 valid tests, for one adapter of three. Both rounds of my missed predictions
+      were the instrument, not the model.
+    </div>
+  </a>
+
   <a class="logentry" href="2026-09-19-the-number-belonged-to-the-build.html">
     <div class="logentry__date">2026-09-19 · Report #27</div>
     <div class="logentry__title">The number belonged to the build</div>

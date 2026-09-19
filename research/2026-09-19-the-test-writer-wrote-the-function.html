@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #28 — The test writer wrote the function · GuildLM Research</title>
+<meta name="description" content="Two untuned bases disagree on 13 of 48 Go tasks and their union is 47. A router that picks per task needs a test it can trust, so I had the model write one from the spec alone. It wrote the function instead — 42 times out of 48. Two deterministic repairs, in the right order, took its tests from 2 valid to 36, and the router to 46. Both rounds of my missed predictions were the instrument, not the model.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #28 · 2026-09-19</div>
+  <h1>The test writer wrote the function</h1>
+  <p class="report__lede">
+    Report #27 left two untuned bases disagreeing on 13 of 48 Go tasks, with a
+    union of 47. Since July the archive has said the same thing about that
+    union: a compile gate cannot select it, because on most disagreements both
+    candidates compile; only a <em>test</em> can. So tonight I had the model
+    write the test, from the spec alone, never seeing a candidate. It wrote the
+    function instead. Forty-two times out of forty-eight. By the end of the night two deterministic
+    repairs had taken its tests from 2 valid to 36, the router sat at 46 of 48,
+    and the specialist question had its first measured answer.
+  </p>
+
+  <h2>Registered first, then drawn</h2>
+  <p>
+    The design went into the log before a single test existed: candidates are
+    the committed generations from #27, the 30B build preferred and the 7B as
+    the alternate; the go-test role writes one test file per task from the
+    prompt only; each candidate runs against that file; and the primary arm,
+    <code>STRICT</code>, moves off the preferred candidate only when the test
+    <em>discriminates</em>, failing it and passing the other. A test that fails
+    both is treated as what it probably is: wrong. Arithmetic fixed before the
+    draw: best single 44, compile gate 45 (the 30B does not build
+    <code>min_heap</code>), oracle 47. The whole question was two tasks where
+    the 30B builds and is wrong, <code>lru_touch</code> and
+    <code>rotate_matrix</code>, against nine tasks only the 30B solves, where a
+    wrong test could route away from the right answer.
+  </p>
+  <p>
+    The 30B's tests were valid against the task's own reference solution
+    <strong>2 times in 48</strong>. The router scored 44, unchanged. The 7B, as
+    a test writer, managed 13 valid tests and caught <code>rotate_matrix</code>:
+    45. I had predicted the stronger model would write the stronger tests, at
+    0.55. Reversed. I had predicted validity above 36 of 48. Off by a factor
+    of eighteen.
+  </p>
+
+  <h2>What a "test" looked like</h2>
+<pre>package sandbox
+
+import "testing"
+
+func Reverse(s string) string {          <span class="report__code-note">// the function under test. In the test file.</span>
+	runes := []rune(s)
+	for i, j := 0, len(runes)-1; i &lt; j; i, j = i+1, j-1 {
+		runes[i], runes[j] = runes[j], runes[i]
+	}
+	return string(runes)
+}
+
+func TestReverse(t *testing.T) {          <span class="report__code-note">// a perfectly reasonable table test follows</span>
+	…</pre>
+  <p>
+    The autopsy tool classifies each failure by the toolchain's first error line.
+    For the 30B: 42 of 48 files <em>redeclare</em> the function under test, so
+    the package cannot build against any candidate and the test can discriminate
+    nothing. The prompt says "do not redefine the function under test". It did
+    it anyway, almost every time. The 7B redeclared 22 times and got 11 more
+    wrong in the other way, with assertions that are false of the reference: one
+    test expected a full-width <code>！</code> to come back as ASCII
+    <code>!</code>. That second class is judgement. The first is form.
+  </p>
+
+  <h2>Form is the machine's job</h2>
+  <p>
+    A missing import is a form error, and <code>goimports</code> has fixed it in
+    this harness since July without anyone calling that cheating. A
+    re-implemented function is the same kind of error one size up. So I wrote
+    <code>stripdecl</code>, about a hundred lines over <code>go/ast</code>: given
+    the candidate being tested and the test file, drop every top-level
+    declaration in the test whose name the candidate already declares. It never
+    touches a <code>TestXxx</code>. It never sees the reference. It is not in the
+    prereg, so the log says <em>post-hoc</em> in capitals.
+  </p>
+  <p>
+    Validity went from 2 to 21. The router caught <code>rotate_matrix</code>.
+    And the two gains on the table turned out to be disjoint: the compile gate
+    takes <code>min_heap</code>, the test gate takes <code>rotate_matrix</code>,
+    so compile-then-test is 46 of 48. Computed, not drawn; the log says that
+    too.
+  </p>
+
+  <h2>The prompt was not the lever. My tool order was.</h2>
+  <p>
+    Second prereg: register the repair, and add a prompt that forbids the form
+    error outright, "the implementation already exists; declare only
+    <code>TestXxx</code> functions; assert only what the specification states".
+    Prediction: validity at or above 30. Result: 21, for both writers, exactly
+    where the post-hoc number had been. The prompt halved the redeclarations,
+    from 42 to 19, and bought nothing past the repair. The registered silent
+    branch fired, and I wrote its conclusion down: the bottleneck is judgement,
+    the next lever is a trained test writer.
+  </p>
+  <p>
+    Then I ran the autopsy on what remained after the repair and found twelve
+    files failing with <em>imported and not used</em>. Of course they were.
+    <code>stripdecl</code> removes the re-implemented function; the imports that
+    function used stay behind; and <code>goimports</code>, which would remove
+    them, had already run, <em>before</em> the strip. The registered order was
+    wrong. Mine.
+  </p>
+<pre>writer × prompt            no repair   registered order   strip → goimports   router
+30B × original                 2             21                 36              46
+30B × "TestXxx only"          17             21                 31              45
+7B  × original                13             16                 27              46
+7B  × "TestXxx only"          16             21                 28              46</pre>
+  <p>
+    Same saved tests, re-scored offline with the two repairs in the right order.
+    The 30B's tests: <strong>36 of 48 valid</strong>, from 2. No prompt change,
+    no training, no judge. The router at 46 in three of four draws. The
+    conclusion I had written an hour earlier is withdrawn in the log, in the
+    same file, under a heading that says so. And the prompt I registered turned
+    out to <em>cost</em> the 30B five points against the original; telling the
+    model what not to write bought nothing the AST repair does not buy better.
+    It is retired.
+  </p>
+
+  <h2>Registered again, and reproduced</h2>
+  <p>
+    A fourth prereg put the corrected order on the record and drew fresh tests
+    from both served writers. The 30B: 36 of 48 valid, to the number. The 7B:
+    27. The router: 46 for both. Three predictions registered, three hits. The
+    post-hoc numbers are facts now.
+  </p>
+  <p>
+    The same prereg asked the question this project has circled since July,
+    posed properly for the first time: with the base given every repair the
+    specialists get, does a trained <code>go-test</code> adapter write more
+    valid tests than its own base? Four writers on MLX, greedy, same pipeline,
+    same prompt.
+  </p>
+<pre>writer                     valid   teeth    false alarms   router
+30B (served)               36/48   12/13       20/83         46
+7B  (served)               27/48   11/13       34/83         46
+7B  MLX, no adapter        26/48   12/13       36/83         47  ← the oracle, once
+7B  + go-test              31/48   11/13       30/83         45
+7B  + go-test-v2           22/48   12/13       46/83         45
+7B  + go-test-scaled       17/48   12/13       53/83         46</pre>
+  <p>
+    Two columns I had not planned to look at turned out to be the ones that
+    matter. <em>Teeth</em>: of the 13 candidate answers the hidden bench calls
+    wrong, how many does the writer's test fail? Eleven or twelve, for every
+    writer, trained or not, 7B or 30B. <em>False alarms</em>: of the 83 answers
+    the bench calls right, how many does the test fail anyway? Twenty for the
+    30B, fifty-three for the worst adapter. Every writer bites wrong code. What
+    separates them is how often they bite the innocent. Validity, seen from the
+    other side.
+  </p>
+  <p>
+    So the specialist question has its first honest answer, and it is small and
+    not monotone. <code>go-test</code> v1 beats its base by five valid tests,
+    the first specialist edge in this archive to survive a repair. Its two
+    siblings lose four and nine. And the edge is entirely in false alarms; its
+    teeth did not move, so its router is <em>worse</em> than the base's. It
+    learned not to bite the innocent quite as often. It did not learn to bite
+    harder.
+  </p>
+  <p>
+    And the 47. The untrained 7B on MLX reached the oracle once, through
+    <code>lru_touch</code>, on a test that is wrong about the spec: it assumes a
+    zero-value <code>Counter</code> works, which the reference does not promise.
+    That wrong test happened to fail the 30B's wrong answer and pass the 7B's
+    right one. The arm that only trusts a test after it passes the reference
+    scores 46. The log says 47 and says on what.
+  </p>
+
+  <h2>What this leaves</h2>
+  <p>
+    The residual is real and it is a third of what it looked like: twelve of the
+    30B's 48 tests are wrong about the spec, and the last point on the table,
+    <code>lru_touch</code>, is exactly that kind. The 30B's own test passes its
+    own wrong <code>Counter</code>; it never reaches the defect. The 7B's tests
+    are valid there too, and also pass it. Forty-seven needs a test that probes
+    the specific thing that is broken. That is judgement, and tonight nothing
+    prompted or repaired its way to it.
+  </p>
+  <p>
+    Twice tonight I registered predictions and missed most of them, and both
+    times the reason was the instrument: first a repair that did not exist, then
+    one that ran in the wrong order. Under the corrected order the predictions
+    about the models would mostly have held. They are recorded as misses,
+    because the pipeline that ran was the one I registered. The rule from
+    Report #26 was already written down, <em>read the file, not the grep</em>,
+    and it caught me anyway. The version that would have saved an hour is
+    smaller: before you register a prediction on top of a tool, hand the tool a
+    case whose answer you already know. A test that re-implements the function,
+    with an import only the function uses, would have failed the pipeline in
+    ten seconds.
+  </p>
+
+  <div class="report__meta">
+    All generation, repair and scoring is local on an M1 Max with Apple MLX and
+    Ollama — total cloud spend: $0. Preregs, result logs, the router, the
+    autopsy, <code>stripdecl</code>, and every self-test set as drawn:
+    <a href="https://github.com/guildlm/guild-code/tree/main/go/crucible" target="_blank" rel="noopener">github.com/guildlm/guild-code · go/crucible</a>.
+    The adapters measured tonight:
+    <a href="https://huggingface.co/guildlm/go-lora-adapters" target="_blank" rel="noopener">guildlm/go-lora-adapters</a>.
+  </div>
+</article>
+</body>
+</html>
