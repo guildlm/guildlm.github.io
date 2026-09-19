@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #27 — The number belonged to the build · GuildLM Research</title>
+<meta name="description" content="The 2026 local-coding favourite lost to our year-old 7B base by six on a fixed Go benchmark. Then a second 4-bit build of the same model scored the best raw number in the archive. The score was never the model's. It was the build's.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #27 · 2026-09-19</div>
+  <h1>The number belonged to the build</h1>
+  <p class="report__lede">
+    After two months away I came back to swap the base model. The 2026 roundups
+    all name the same local coder, so I put it through the fixed Go benchmark
+    that every specialist in this archive was measured on. It lost to the
+    year-old 7B base by six. Then I drew the same model in a second 4-bit build
+    and it posted the best raw number the archive has ever seen. Report #25 said
+    the number belonged to the process. This one belonged to the build.
+  </p>
+
+  <h2>The first draw: minus six, and a smell</h2>
+  <p>
+    <code>Qwen3-Coder-30B-A3B</code> is a mixture-of-experts model with 3.3B
+    parameters active per token. On <code>go_dev_bench</code> v2 — 48 tasks,
+    greedy, the real <code>go build</code> and <code>go test</code>, the same
+    harness as every row in the archive — the <code>mlx-community</code> 4-bit
+    build scored <strong>36/48</strong> raw and <strong>38</strong> after
+    <code>goimports</code>. The untuned 7B base scores 39 and 44 on the same
+    rows. So: not a replacement. Same lesson the specialists taught in July,
+    measure on your own bench before you swap.
+  </p>
+  <p>
+    Two things kept me from writing that as the verdict. It was
+    <em>complementary</em>: it solved seven tasks the 7B cannot, the rune and
+    string and error cluster that has been the 7B's weakness all summer, and
+    failed ten the 7B solves; the union was 46 of 48. And nine of its 48
+    generations had lines indented by a single space. <code>gofmt</code> never
+    emits that. The Qwen2.5-based runs never emitted it on this bench, not once in 528
+    generations across eleven archived runs. It compiled, so it did not explain the score. It
+    just smelled like a lossy artefact.
+  </p>
+<pre>func SortedKeys(m map[string]int) []string {
+ keys := make([]string, 0, len(m))     <span class="report__code-note">// one space. and then:</span>
+ for k := range m {
+  keys = append(key, k)                <span class="report__code-note">// `key` for `keys` — a one-token slip on a trivial task</span>
+ }</pre>
+  <p>
+    So the log got a caveat instead of a conclusion: <em>minus six is a fact
+    about this artefact until the quantization A/B is drawn</em>. Then I drew it.
+  </p>
+
+  <h2>The A/B: two models, two builds, one harness</h2>
+  <p>
+    I wrote a served-endpoint bench that imports the system prompt, the code
+    extractor, the compile check, the test runner and the import repair from the
+    MLX bench rather than copying them, so the only thing that differs between
+    the columns below is the weights file and the engine that runs it. Ollama's
+    <code>Q4_K_M</code> build at temperature 0 on one side, the MLX 4-bit build
+    greedy on the other. Same 48 prompts. All four generation sets are
+    committed and re-score offline without a GPU.
+  </p>
+<pre>model      build                  raw   +goimports   compiles   1-space lines
+7B base    MLX 4-bit               39      44          42/48        0/48
+7B base    Ollama Q4_K_M           35      40          39/48        0/48
+30B-A3B    MLX 4-bit               36      38          40/48        9/48
+30B-A3B    Ollama Q4_K_M           44      44          46/48        0/48</pre>
+  <p>
+    The same checkpoint, in a different 4-bit build, went from 36 to
+    <strong>44</strong>. Six more generations compiled. The single-space
+    fingerprint went from nine to zero. And <code>goimports</code>, which
+    rescues five of the 7B's misses, rescued none of the new build's: it changed
+    23 of its 48 files and flipped no verdicts. Its four misses are real. Two do
+    not build, two build and are wrong. It is the first single model in this
+    archive to reach 44 without the repair.
+  </p>
+
+  <h2>The build effect has a sign</h2>
+  <p>
+    I expected a backend constant, something to subtract. There is none. The 7B
+    <em>loses</em> four points moving from MLX to Ollama. The 30B
+    <em>gains</em> eight moving the same way. Across the two builds, the 7B
+    produced byte-identical code on 10 of 48 tasks; the 30B on 4 of 48. Two
+    4-bit builds of one checkpoint are two different objects, and which one is
+    better is a fact about that pair, not about the engine.
+  </p>
+  <p>
+    Which retires a sentence I wrote in July. The archive says the "served tie"
+    between the 7B base and its specialist was "an Ollama-GGUF artefact, not
+    reproduced on MLX". That was true. It was also a fact about one model's two
+    builds, and I had been carrying it as a fact about Ollama.
+  </p>
+
+  <h2>What the fingerprint was, and was not</h2>
+  <p>
+    It was not a per-task predictor. In the lossy build, four of the nine
+    fingerprinted generations failed against eight of the 39 clean ones, 44
+    percent against 21, on numbers too small to lean on. What it was, was a
+    signature of the artefact. It said "this build is off" before any A/B
+    existed, and that is the only reason minus six went into the log as a caveat
+    and not as a verdict on a model I had never actually measured.
+  </p>
+  <p>
+    The rule it leaves is the one this project keeps re-earning from a new
+    direction. On 15 August it was <em>determinism within a process is not
+    portability across processes</em>. Tonight it is one level down: a score
+    without a build identifier is under-specified. Every row in the result log
+    now names its build and its snapshot hash. The lossy build's weights are
+    deleted; its generations are committed, so its number reproduces without it.
+  </p>
+
+  <h2>The ceiling moved, the condition did not</h2>
+  <p>
+    The union of the 7B on MLX and the 30B on Q4_K_M is 47 of 48 raw, and 48
+    with the import repair. That is the same ceiling the diverse 14B fleet hit in
+    July, reached now by two <em>untuned</em> bases. The oracle caveat is
+    unchanged: on most tasks where the two disagree, both compile, so a compile
+    gate selects nothing. The router that cashes this union still has to be
+    gated on a test. That was the condition on 23 July and it is the condition
+    tonight; what changed is that the cheapest member of the fleet is now a base
+    you can pull in one line, and it runs 1.65 times faster than the dense 7B on
+    the same endpoint.
+  </p>
+
+  <h2>Also tonight: every adapter, with its score</h2>
+  <p>
+    The 43 LoRA adapters this archive trained for Go, most of them net-negative
+    against their base, are now published in one place with the number each one
+    earned, the Kaggle checkpoints beside them, and a card rendered from each
+    adapter's own config so it cannot drift from the weights:
+    <a href="https://huggingface.co/guildlm/go-lora-adapters" target="_blank" rel="noopener">guildlm/go-lora-adapters</a>.
+    Publishing the losers is the point. The bet was never that the weights
+    would win. It was that the machine around them would, and the only way to
+    keep measuring that honestly is to keep every weight that lost.
+  </p>
+
+  <div class="report__meta">
+    All benchmarking is local on an M1 Max with Apple MLX and Ollama — total
+    cloud spend: $0. The harness, the served bench, the A/B tabulator and all
+    four committed generation sets:
+    <a href="https://github.com/guildlm/guild-code/tree/main/go/crucible" target="_blank" rel="noopener">github.com/guildlm/guild-code · go/crucible</a>
+    (<code>RESULT-go-dev-bench-v2.txt</code>, addenda A and B).
+  </div>
+</article>
+</body>
+</html>

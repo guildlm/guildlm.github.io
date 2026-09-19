@@ -34,6 +34,20 @@
     said (wins <em>and</em> losses). All runs are local, $0, and reproducible.
   </p>
 
+  <a class="logentry" href="2026-09-19-the-number-belonged-to-the-build.html">
+    <div class="logentry__date">2026-09-19 · Report #27</div>
+    <div class="logentry__title">The number belonged to the build</div>
+    <div class="logentry__desc">
+      I came back to swap the base model. The 2026 local-coding favourite lost to our year-old 7B base by six
+      on the fixed Go benchmark — and nine of its 48 generations were indented by a single space, which
+      <code>gofmt</code> never emits. So the log got a caveat, not a verdict, and I drew the quantization A/B:
+      the same checkpoint in Ollama's Q4_K_M build scored <strong>44/48 raw</strong>, the best single-model
+      number in the archive, with the fingerprint gone. The build effect even has a sign: the 7B loses four
+      moving to that engine, the 30B gains eight. A score without a build identifier is under-specified.
+      Also: all 43 Go adapters, losers included, are now on Hugging Face with the number each one earned.
+    </div>
+  </a>
+
   <a class="logentry" href="2026-07-17-the-spec-named-nothing.html">
     <div class="logentry__date">2026-07-17 · Report #26</div>
     <div class="logentry__title">The spec named nothing</div>
