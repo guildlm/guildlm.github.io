@@ -34,6 +34,22 @@
     said (wins <em>and</em> losses). All runs are local, $0, and reproducible.
   </p>
 
+  <a class="logentry" href="2026-09-20-the-loop-had-nothing-to-hear.html">
+    <div class="logentry__date">2026-09-20 · Report #29</div>
+    <div class="logentry__title">The loop had nothing to hear</div>
+    <div class="logentry__desc">
+      go_dev_bench was saturated (union 48/48, best single 44), so I built <strong>go_swe_bench v0</strong>
+      from the project's own mine: 246 real Go bug-fix commits, verified red-before/green-after by the
+      toolchain, no model in the build. The archive's best model passes <strong>11 of 51</strong> when
+      handed the exact files, and the wall is file size, not the bug: 7 · 4 · 0 by size tertile. My
+      extractor's bug moved that model by 0 and the 7B by 9 (0 → 9), so the registered gap was the
+      tool's. A declaration-level edit form (<code>decledit</code>, go/ast) took the 30B to
+      <strong>15</strong> with no training, a strict superset at 40% of the output. A repair loop fed by
+      the compiler and the repository's tests added nothing: on 21 of 36 failures they were silent,
+      because a bug-fix bench is by construction the bugs those tests miss.
+    </div>
+  </a>
+
   <a class="logentry" href="2026-09-19-the-test-writer-wrote-the-function.html">
     <div class="logentry__date">2026-09-19 · Report #28</div>
     <div class="logentry__title">The test writer wrote the function</div>

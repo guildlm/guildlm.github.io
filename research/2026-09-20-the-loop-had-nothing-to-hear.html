@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report #29 — The loop had nothing to hear · GuildLM Research</title>
+<meta name="description" content="go_dev_bench was saturated, so I built a Go SWE-bench from 246 real bug-fix commits verified by the toolchain. The best local model passes 11 of 51 when handed the exact files; the wall is file size, not the bug. A declaration-level edit form took it to 15 with no training. A repair loop fed by the compiler and the repository's tests added nothing, because a bug-fix bench is by construction the set of bugs those tests miss. And my extractor's bug moved one model by 0 and the other by 9.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<nav class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="../index.html" aria-label="GuildLM home">
+      <svg class="nav__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M16 2 4 7v9c0 7 5 12 12 14 7-2 12-7 12-14V7L16 2Z" stroke="#D4AF37" stroke-width="1.6" fill="rgba(212,175,55,0.08)"/>
+        <path d="M16 9l3 5-3 9-3-9 3-5Z" fill="#D4AF37"/>
+      </svg>
+      <span class="nav__logo-text">GUILDLM</span>
+    </a>
+    <div class="nav__links">
+      <a class="nav__link" href="index.html">Research</a>
+      <a class="nav__link nav__link--cta" href="https://github.com/guildlm" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<article class="report">
+  <a class="report__back" href="index.html">← Research log</a>
+  <div class="report__date">Report #29 · 2026-09-20</div>
+  <h1>The loop had nothing to hear</h1>
+  <p class="report__lede">
+    After Report #28 the question was not what to draw next but on what. Thirteen
+    runs on go_dev_bench had a union of 48 of 48; the best single model sat at
+    44; every result since July had been decided on the last one to four tasks.
+    The instrument had run out of resolution. So this weekend I built a new one
+    from the project's own mine: <strong>go_swe_bench v0</strong>, 246 real Go
+    bug-fix commits from 79 repositories, each verified red-before and
+    green-after by <code>go test</code>, no model anywhere in the build. Then I
+    put the archive's best model on it, found the wall, changed the form, and
+    found where a repair loop goes deaf.
+  </p>
+
+  <h2>A bench with room</h2>
+  <p>
+    The mine already existed. In June the same pipeline had pulled 7,536 real
+    commits from 733 repositories to train on, and had dropped every test file
+    by design, because a fine-tune does not want them. A bench wants nothing
+    else. Inverting one filter and keeping only bug-fix commits that co-change a
+    <code>_test.go</code>, then running the commit's tests against the parent
+    with the fix removed, gave 502 candidates and <strong>246 verified tasks</strong>
+    in 104 minutes: 191 caught by a red assertion, 55 by a compile error. The
+    eval set was fixed by rule before any model ran: the newest task of every
+    repository whose source fits in 30k characters, one per repo, 51 tasks. The
+    v0 form is the cheapest honest one: the model gets the commit message and
+    the full content of the files that change, the tests stay hidden, it
+    returns every file in full, and pass@1 means green.
+  </p>
+  <p>
+    The prereg said the 30B would land between 20 and 60 percent at 0.65. It
+    landed at <strong>11 of 51</strong>, 21.6 percent, one task inside the band.
+    The same model scores 44 of 48 on the old bench. The room is real.
+  </p>
+
+  <h2>The wall is the file, not the bug</h2>
+  <p>
+    Where the 40 losses went was the finding. Sorted by the size of the files
+    the model had to return, the smallest third passed 7 of 17, the middle 4 of
+    17, the largest <strong>0 of 17</strong>. The median gold patch of a passing
+    task changed 48 characters; of a failing task, 157. Nothing above 16
+    thousand characters passed, whether or not the token cap had cut it. The
+    form asks the model to reproduce 20 thousand characters verbatim in order
+    to be allowed to change 50, and that is the form that loses. The 11 tasks
+    whose hidden test names a symbol that does not yet exist went 0 of 11, and
+    would in every arm that followed: a model that cannot see the test cannot
+    guess the name it wants.
+  </p>
+
+  <h2>The instrument, per model</h2>
+  <p>
+    Before believing any of that I read the outputs. Eleven of the 30B's 51
+    open a code fence, write the file tag, and open the fence again; my
+    registered extractor read nine of those as empty files. I repaired the
+    extractor, re-scored only the rows the two versions read differently, and
+    the number did not move: <strong>11 and 11</strong>. Every emptied row was
+    wrong on its content as well. I had expected a swing of up to nine and
+    measured zero, and wrote that down as the rule cutting the other way.
+  </p>
+  <p>
+    Then the 7B finished. Registered: <strong>0 of 51</strong>. The stutter sits
+    in 39 of its 51 outputs. Repaired extractor, same generations:
+    <strong>9 of 51</strong>. The same tool bug moved one model by zero and the
+    other by nine, and the registered prediction that the 30B would beat the
+    7B by ten points, a hit at 21.6 to 0, is a miss at 21.6 to 17.6 once the
+    instrument is symmetric. Both verdicts are in the log with the one I trust
+    marked. The lesson is the one Report #27 wrote about builds, one level
+    down: a defect that lands harder on one arm manufactures a gap, and the
+    tool's failure rate per arm has to be read before the gap is. The two
+    models still fail differently, six passes shared, five only the 30B, three
+    only the 7B, union 14, the same shape the router line has been chasing
+    since July.
+  </p>
+
+  <h2>Edit the declaration, not the file</h2>
+  <p>
+    If the wall is retyping, stop retyping. <code>decledit</code> is a small
+    go/ast tool: the model returns only the top-level declarations it changes,
+    and the tool replaces each one by name in the target file, adds the new
+    ones, deletes on a directive, unions the imports, and hands the result to
+    <code>goimports</code>. Before any model touched it, the tool had to carry
+    every gold fix: turn each gold patch into a fragment, apply it back onto
+    the parent, run the hidden tests. <strong>51 of 51</strong>, with the
+    fragment a quarter of the file. The same test run through the full loop
+    harness found six false alarms in the feedback path on the first pass, the
+    parent's stale copies of the very test files the commits rewrote, and nine
+    new ones on the second pass after I deleted those copies, because other
+    tests in the package used their helpers. Filtered instead of deleted:
+    51 of 51, zero alarms, registered.
+  </p>
+  <p>
+    Drawn: <strong>15 of 51</strong> at round zero, a strict superset of the
+    file-level passes, at 40 percent of the output. The largest third went
+    from 0 to 1. The prereg had put 14 or better at 0.55. A repeated-declaration
+    bug in the applier, which the gold test could not have caught because gold
+    fragments never say a name twice, cost one more verdict; fixed and
+    labelled, 16.
+  </p>
+
+  <h2>Where a repair loop goes deaf</h2>
+  <p>
+    The second half of the arm was the loop: apply the edit, run the compiler
+    and the repository's existing tests, feed back what they say, up to two
+    more rounds, hidden tests never shown. It fired on 15 tasks and converted
+    <strong>none</strong>. Twelve of the firings were the model returning a
+    hunk, statements from inside a function, rather than a declaration, and
+    told so, returning another hunk. Three were compile errors, two of them my
+    applier's. But the number that matters is 21: on 21 of the 36 failures the
+    toolchain was <em>silent</em> while the hidden test was red. That is not a
+    weakness of the loop. It is the bench. A bug-fix commit that adds a test is,
+    by construction, a bug the existing tests did not catch. A loop fed by the
+    existing tests is a loop fed by the one signal guaranteed to say nothing
+    about the defect, and the compiler only sees form. The prereg had given
+    "loop beats round zero by three" 0.50. Miss, and now I know why.
+  </p>
+
+  <h2>What this leaves</h2>
+  <p>
+    The bench works: three arms, three numbers far from the ceiling, a size
+    gradient that survived a change of form, and an instrument accounting that
+    moved one model and not the other. The edit form is the registered form
+    from here. And the loop has told me what it needs: not more rounds, but a
+    test with teeth, written for the bug at hand, which is exactly what the
+    router line measured a test writer doing last week, 36 valid tests in 48,
+    biting wrong code 11 times in 13 and the innocent 20 times in 83. The next
+    arm is that writer inside this loop, with its false-alarm cost stated up
+    front, because on this bench a false alarm turns a right fix into a wrong
+    one and there is no other signal to check it against.
+  </p>
+
+  <div class="report__meta">
+    All mining, generation, repair and scoring is local on an M1 Max with Ollama
+    and the Go toolchain — total cloud spend: $0. The bench:
+    <a href="https://huggingface.co/datasets/guildlm/go-swe-bench-v0" target="_blank" rel="noopener">guildlm/go-swe-bench-v0</a>
+    (246 tasks, the 51-task eval set, and a card with every baseline row carrying
+    its build and its extractor). Preregs, result logs, the miner, the harnesses,
+    <code>decledit</code>, and every generation as drawn:
+    <a href="https://github.com/guildlm/guild-code/tree/main/go/crucible" target="_blank" rel="noopener">github.com/guildlm/guild-code · go/crucible</a>.
+  </div>
+</article>
+</body>
+</html>
